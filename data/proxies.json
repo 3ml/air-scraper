@@ -1,0 +1,9 @@
+{
+  "proxies": [],
+  "config": {
+    "rotationStrategy": "least-used",
+    "healthCheckInterval": 300000,
+    "maxFailures": 3,
+    "cooldownAfterFailure": 60000
+  }
+}

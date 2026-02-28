@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  scraper:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - scraper-data:/app/data
+      - scraper-logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_PATH=/app/data/scraper.db
+      - AUTH_TOKEN=${AUTH_TOKEN:-change-me-in-production}
+      - SCRAPER_SECRET=${SCRAPER_SECRET:-scraper-secret}
+      - CALLBACK_URL=${CALLBACK_URL:-https://app.airelite.it/api/scraper/callback}
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-https://app.airelite.it/api/scraper/alert}
+      - BROWSER_HEADLESS=true
+      - BROWSER_POOL_SIZE=3
+      - MAX_CONCURRENT_TASKS=5
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  scraper-data:
+  scraper-logs:
