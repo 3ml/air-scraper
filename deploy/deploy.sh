@@ -65,7 +65,7 @@ log "Waiting for app to start..."
 sleep 5
 
 # Health check
-if curl -s http://localhost:3322/health | grep -q "ok"; then
+if curl -s http://localhost:3000/health | grep -q "ok"; then
     log "Health check passed!"
 else
     log "WARNING: Health check failed!"
