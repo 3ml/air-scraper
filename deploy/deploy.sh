@@ -33,30 +33,34 @@ log "Pulling latest changes from git..."
 git fetch origin
 git reset --hard origin/main
 
-# 2. Install dependencies (if package.json changed)
+# 2. Install ALL dependencies (including devDependencies for build)
 log "Installing dependencies..."
-npm ci --production
+npm ci
 
 # 3. Build TypeScript
 log "Building TypeScript..."
 npm run build
 
-# 4. Run database migrations (if any)
+# 4. Prune devDependencies after build
+log "Pruning devDependencies..."
+npm prune --production
+
+# 5. Run database migrations (if any)
 log "Running migrations..."
 npm run migrate || true
 
-# 5. Build dashboard (optional - uncomment if needed)
+# 7. Build dashboard (optional - uncomment if needed)
 # log "Building dashboard..."
 # cd dashboard
 # npm ci
 # npm run build
 # cd ..
 
-# 6. Restart PM2 app
+# 8. Restart PM2 app
 log "Restarting application..."
 pm2 reload air-scraper --update-env
 
-# 7. Wait and check health
+# 9. Wait and check health
 log "Waiting for app to start..."
 sleep 5
 
