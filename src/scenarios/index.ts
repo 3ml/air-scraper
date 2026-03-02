@@ -3,10 +3,12 @@ export { scenarioRegistry, RegisterScenario } from './registry.js';
 
 // Import and register all scenarios
 import { TestScenario } from './implementations/test.scenario.js';
+import { AirEliteTestScenario } from './implementations/airelite-test.scenario.js';
 import { scenarioRegistry } from './registry.js';
 
 // Register built-in scenarios
 scenarioRegistry.register(TestScenario);
+scenarioRegistry.register(AirEliteTestScenario);
 
 /**
  * Load custom scenarios dynamically (for future extensibility)

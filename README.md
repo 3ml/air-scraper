@@ -603,6 +603,38 @@ pm2 restart air-scraper
 
 ---
 
+## Production Deployment Info
+
+| Resource | Value |
+|----------|-------|
+| **Server IP** | `77.42.80.187` |
+| **API URL** | `https://scraper.airelite.it/api/trigger` |
+| **Port** | `3322` |
+| **App Directory** | `/opt/air-scraper` |
+
+### DNS Configuration
+
+Point the following DNS A record:
+```
+scraper.airelite.it  →  77.42.80.187
+```
+
+### Caddy Configuration
+
+```caddyfile
+scraper.airelite.it {
+    reverse_proxy localhost:3322
+
+    header {
+        -Server
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+    }
+}
+```
+
+---
+
 ## Documentation
 
 - [CLAUDE.md](./CLAUDE.md) - Development guide and API reference
