@@ -12,7 +12,7 @@ if (!existsSync(dbDir)) {
 }
 
 // Create SQLite connection
-const sqlite = new Database(env.DATABASE_PATH);
+const sqlite: InstanceType<typeof Database> = new Database(env.DATABASE_PATH);
 sqlite.pragma('journal_mode = WAL');
 sqlite.pragma('foreign_keys = ON');
 

@@ -55,19 +55,20 @@ export async function createServer() {
 
   // Error handler
   fastify.setErrorHandler(async (error, request, reply) => {
+    const err = error as Error & { statusCode?: number };
     logger.error(
       {
-        error: error.message,
-        stack: error.stack,
+        error: err.message,
+        stack: err.stack,
         requestId: request.requestId,
       },
       'Request error'
     );
 
-    const statusCode = error.statusCode || 500;
+    const statusCode = err.statusCode || 500;
     reply.code(statusCode).send({
-      error: error.name || 'Internal Server Error',
-      message: error.message,
+      error: err.name || 'Internal Server Error',
+      message: err.message,
       statusCode,
     });
   });

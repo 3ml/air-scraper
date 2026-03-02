@@ -1,7 +1,8 @@
 import type { BaseScenario, ScenarioConfig } from './BaseScenario.js';
 import logger from '../observability/logger.js';
 
-type ScenarioConstructor = new () => BaseScenario;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ScenarioConstructor = new () => BaseScenario<any, any>;
 
 /**
  * ScenarioRegistry - Manages registration and lookup of scraping scenarios

@@ -1,6 +1,7 @@
 import { env } from '../config/env.js';
 import { db } from '../db/client.js';
 import { alerts } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
 import logger from '../observability/logger.js';
 import type { AlertPayload } from '../types/api.types.js';
 
@@ -63,7 +64,7 @@ export class AlertService {
               responseBody,
               sentAt: new Date().toISOString(),
             })
-            .where((a, { eq }) => eq(a.id, alertRecord.id));
+            .where(eq(alerts.id, alertRecord.id));
 
           logger.info({ alertId: alertRecord.id, type: payload.type }, 'Alert sent successfully');
           return true;
@@ -93,7 +94,7 @@ export class AlertService {
         responseBody,
         retryCount: MAX_RETRIES,
       })
-      .where((a, { eq }) => eq(a.id, alertRecord.id));
+      .where(eq(alerts.id, alertRecord.id));
 
     logger.error(
       { alertId: alertRecord.id, error: lastError?.message },
