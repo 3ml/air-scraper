@@ -6,6 +6,15 @@
 [Local] git push → [GitHub] webhook → [Server:9000] → deploy.sh → PM2 restart
 ```
 
+## Secrets Location
+
+| Secret | Location | Notes |
+|--------|----------|-------|
+| **WEBHOOK_SECRET** | Server: `/opt/air-scraper/deploy/webhook.ecosystem.config.cjs` | Retrieve with: `ssh root@77.42.80.187 "grep WEBHOOK_SECRET /opt/air-scraper/deploy/webhook.ecosystem.config.cjs"` |
+| **GitHub Webhook** | GitHub → Repo Settings → Webhooks | Must match server secret |
+
+> ⚠️ **Security**: The webhook secret is NOT stored in the git repository. It only exists on the production server and in GitHub webhook settings.
+
 ## Initial Server Setup (One-time)
 
 ### 1. SSH into server
