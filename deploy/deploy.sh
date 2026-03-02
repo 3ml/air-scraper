@@ -35,7 +35,7 @@ git reset --hard origin/main
 
 # 2. Install ALL dependencies (including devDependencies for build)
 log "Installing dependencies..."
-NODE_ENV=development npm ci
+npm ci --include=dev
 
 # 3. Build TypeScript
 log "Building TypeScript..."
