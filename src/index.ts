@@ -27,6 +27,11 @@ async function main(): Promise<void> {
     setupGracefulShutdown();
 
     logger.info('Air Scraper started successfully');
+
+    // Signal PM2 that we're ready (for zero-downtime reload)
+    if (process.send) {
+      process.send('ready');
+    }
   } catch (error) {
     logger.fatal({ error }, 'Failed to start Air Scraper');
     process.exit(1);

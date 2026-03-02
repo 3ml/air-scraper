@@ -56,21 +56,44 @@ npm run migrate || true
 # npm run build
 # cd ..
 
-# 8. Restart PM2 app
-log "Restarting application..."
-pm2 reload air-scraper --update-env
+# 8. Reload PM2 app (zero-downtime with cluster mode)
+log "Reloading application (zero-downtime)..."
 
-# 9. Wait and check health
-log "Waiting for app to start..."
-sleep 5
-
-# Health check
-if curl -s http://localhost:3000/health | grep -q "ok"; then
-    log "Health check passed!"
+# Check if app exists in PM2, if not start it
+if pm2 list | grep -q "air-scraper"; then
+    # Graceful reload - one instance at a time
+    pm2 reload ecosystem.config.cjs --env production
 else
-    log "WARNING: Health check failed!"
+    # First deploy - start the app
+    log "First deploy - starting app..."
+    pm2 start ecosystem.config.cjs --env production
+    pm2 save
+fi
+
+# 9. Wait for ready signal and check health
+log "Waiting for instances to be ready..."
+sleep 3
+
+# Health check with retries
+MAX_RETRIES=5
+RETRY_COUNT=0
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if curl -s http://localhost:3000/health | grep -q "ok"; then
+        log "Health check passed!"
+        break
+    fi
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    log "Health check attempt $RETRY_COUNT/$MAX_RETRIES failed, retrying..."
+    sleep 2
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    log "WARNING: Health check failed after $MAX_RETRIES attempts!"
     pm2 logs air-scraper --lines 20
 fi
+
+# Show cluster status
+pm2 list
 
 log "========================================="
 log "Deployment completed!"
