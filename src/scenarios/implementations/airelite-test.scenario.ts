@@ -169,18 +169,16 @@ export class AirEliteTestScenario extends BaseScenario<AirEliteTestInput, AirEli
           if (processedIds.has(propertyId)) return;
           processedIds.add(propertyId);
 
-          // Find the parent card container
-          let card = link.closest('[class*="card"], [class*="property"], div > div > div') as HTMLElement | null;
-          if (!card) {
-            // Try to find by traversing up
-            let parent = link.parentElement;
-            for (let i = 0; i < 10 && parent; i++) {
-              if (parent.querySelector('a[href*="/dashboard/owners/"]')) {
-                card = parent;
-                break;
-              }
-              parent = parent.parentElement;
+          // Find the parent card container by traversing up until we find owner link
+          let card: HTMLElement | null = null;
+          let parent = link.parentElement;
+          for (let i = 0; i < 15 && parent; i++) {
+            if (parent.querySelector('a[href*="/dashboard/owners/"]') &&
+                parent.textContent?.includes('Smoobu id:')) {
+              card = parent;
+              break;
             }
+            parent = parent.parentElement;
           }
           if (!card) return;
 
@@ -191,7 +189,7 @@ export class AirEliteTestScenario extends BaseScenario<AirEliteTestInput, AirEli
             const text = el.textContent?.trim() || '';
             if (text && text.length > 2 && text.length < 100 && !text.includes(':') && !text.includes('id:')) {
               // Skip known labels
-              if (['Dashboard', 'Strutture', 'Info', 'Spese', 'Conteggi', 'Contratto', 'Documentazione', 'ACCEDI', 'AGGIUNGI', 'Cancella', 'Responsabili', 'Attivo', 'TODO', 'letti', 'bagni', 'bagno', 'Mq', 'stato', 'periodi contabili'].some(skip => text.includes(skip))) continue;
+              if (['Dashboard', 'Strutture', 'Info', 'Spese', 'Conteggi', 'Contratto', 'Documentazione', 'ACCEDI', 'AGGIUNGI', 'Cancella', 'Responsabili', 'Attivo', 'TODO', 'letti', 'bagni', 'bagno', 'Mq', 'stato', 'periodi contabili', 'Tassa Soggiorno', 'TASSE', 'Nessun responsabile'].some(skip => text.includes(skip))) continue;
               if (text.match(/^\d+$/)) continue;
               if (text.match(/^Del \d/)) continue;
               if (text.match(/^\d{4}-\d+$/)) continue;
