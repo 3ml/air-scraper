@@ -82,7 +82,8 @@ export class TaskWorker {
     try {
       await this.processTask(queuedTask);
     } catch (error) {
-      logger.error({ taskUuid: queuedTask.uuid, error }, 'Unexpected error processing task');
+      // Comprehensive error handling - ensures alerts are sent
+      await this.handleUnexpectedError(queuedTask, error);
     } finally {
       this.activeWorkers--;
     }
@@ -107,6 +108,18 @@ export class TaskWorker {
     if (!task) {
       taskLogger.error('Task not found in database');
       taskQueue.markFailed(queuedTask.uuid);
+
+      // Send alert for orphaned task
+      try {
+        await alertService.sendAlert({
+          type: 'error',
+          title: 'Orphaned Task',
+          message: `Task ${queuedTask.uuid} not found in database`,
+          context: { taskUuid: queuedTask.uuid, action: queuedTask.action },
+        });
+      } catch (alertError) {
+        taskLogger.error({ alertError }, 'Failed to send orphaned task alert');
+      }
       return;
     }
 
@@ -132,7 +145,12 @@ export class TaskWorker {
     const scenario = scenarioRegistry.get(queuedTask.action);
     if (!scenario) {
       taskLogger.error('Scenario not found');
-      await this.failTask(queuedTask.uuid, 'Scenario not found', task.attemptCount + 1, task.maxAttempts);
+      // Fail immediately - don't retry since scenario won't magically appear
+      await this.failTaskPermanently(
+        queuedTask.uuid,
+        queuedTask.action,
+        `Scenario '${queuedTask.action}' not found`
+      );
       return;
     }
 
@@ -186,9 +204,17 @@ export class TaskWorker {
     attemptCount: number,
     maxAttempts: number
   ): Promise<void> {
-    const task = await db.query.tasks.findFirst({
-      where: (t, { eq }) => eq(t.uuid, taskUuid),
-    });
+    let task;
+    try {
+      task = await db.query.tasks.findFirst({
+        where: (t, { eq }) => eq(t.uuid, taskUuid),
+      });
+    } catch (dbError) {
+      logger.error({ taskUuid, dbError }, 'Failed to fetch task for failure handling');
+      // Still try to send alert even if DB read fails
+      await this.sendFailureAlertSafe(taskUuid, 'unknown', errorMessage);
+      return;
+    }
 
     if (!task) return;
 
@@ -199,47 +225,55 @@ export class TaskWorker {
       const retryDelay = DelayManager.exponentialBackoff(attemptCount);
       const nextRetryAt = new Date(Date.now() + retryDelay).toISOString();
 
-      await db
-        .update(tasks)
-        .set({
-          status: 'pending',
-          errorMessage,
-          nextRetryAt,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(tasks.uuid, taskUuid));
+      try {
+        await db
+          .update(tasks)
+          .set({
+            status: 'pending',
+            errorMessage,
+            nextRetryAt,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(tasks.uuid, taskUuid));
 
-      // Requeue with lower priority
-      taskQueue.requeue({
-        uuid: taskUuid,
-        action: task.action,
-        priority: Math.min(10, task.priority + 1),
-      });
+        // Requeue with lower priority
+        taskQueue.requeue({
+          uuid: taskUuid,
+          action: task.action,
+          priority: Math.min(10, task.priority + 1),
+        });
 
-      taskLogger.warn(
-        { attemptCount, maxAttempts, nextRetryAt },
-        'Task failed, scheduling retry'
-      );
+        taskLogger.warn(
+          { attemptCount, maxAttempts, nextRetryAt },
+          'Task failed, scheduling retry'
+        );
+      } catch (dbError) {
+        taskLogger.error({ dbError }, 'Failed to schedule retry, failing permanently');
+        // If we can't schedule retry, fail permanently
+        await this.failTaskPermanently(taskUuid, task.action, errorMessage);
+      }
     } else {
       // Final failure
-      await db
-        .update(tasks)
-        .set({
-          status: 'failed',
-          errorMessage,
-          completedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(tasks.uuid, taskUuid));
+      try {
+        await db
+          .update(tasks)
+          .set({
+            status: 'failed',
+            errorMessage,
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(tasks.uuid, taskUuid));
+      } catch (dbError) {
+        taskLogger.error({ dbError }, 'Failed to update task status to failed');
+      }
 
       taskQueue.markFailed(taskUuid);
       incrementActionCounter(task.action, false);
 
-      // Send alert
-      await alertService.sendTaskFailureAlert(taskUuid, task.action, errorMessage);
-
-      // Send callback with failure
-      await callbackService.sendCallback(taskUuid);
+      // Send alert and callback using safe methods
+      await this.sendFailureAlertSafe(taskUuid, task.action, errorMessage);
+      await this.sendCallbackSafe(taskUuid);
 
       taskLogger.error({ attemptCount, errorMessage }, 'Task failed permanently');
     }
@@ -264,6 +298,110 @@ export class TaskWorker {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Handle unexpected errors that escape processTask()
+   */
+  private async handleUnexpectedError(
+    queuedTask: QueuedTask,
+    error: unknown
+  ): Promise<void> {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+
+    logger.error(
+      { taskUuid: queuedTask.uuid, action: queuedTask.action, error: errorMessage, stack: errorStack },
+      'Unexpected error processing task'
+    );
+
+    // Try to update task status in DB
+    try {
+      await db
+        .update(tasks)
+        .set({
+          status: 'failed',
+          errorMessage: `Unexpected error: ${errorMessage}`,
+          completedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(tasks.uuid, queuedTask.uuid));
+    } catch (dbError) {
+      logger.error({ taskUuid: queuedTask.uuid, dbError }, 'Failed to update task status after unexpected error');
+    }
+
+    // Mark failed in queue
+    taskQueue.markFailed(queuedTask.uuid);
+    incrementActionCounter(queuedTask.action, false);
+
+    // Always try to send alert and callback
+    await this.sendFailureAlertSafe(queuedTask.uuid, queuedTask.action, `Unexpected error: ${errorMessage}`);
+    await this.sendCallbackSafe(queuedTask.uuid);
+  }
+
+  /**
+   * Fail task permanently without retry (for non-retryable errors)
+   */
+  private async failTaskPermanently(
+    taskUuid: string,
+    action: string,
+    errorMessage: string
+  ): Promise<void> {
+    const taskLogger = logger.child({ taskUuid, action });
+
+    try {
+      await db
+        .update(tasks)
+        .set({
+          status: 'failed',
+          errorMessage,
+          completedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(tasks.uuid, taskUuid));
+    } catch (dbError) {
+      taskLogger.error({ dbError }, 'Failed to update task status to failed');
+    }
+
+    taskQueue.markFailed(taskUuid);
+    incrementActionCounter(action, false);
+
+    await this.sendFailureAlertSafe(taskUuid, action, errorMessage);
+    await this.sendCallbackSafe(taskUuid);
+
+    taskLogger.error({ errorMessage }, 'Task failed permanently (non-retryable)');
+  }
+
+  /**
+   * Send failure alert safely (never throws)
+   */
+  private async sendFailureAlertSafe(
+    taskUuid: string,
+    action: string,
+    errorMessage: string
+  ): Promise<void> {
+    try {
+      await alertService.sendTaskFailureAlert(taskUuid, action, errorMessage);
+    } catch (error) {
+      logger.error(
+        { taskUuid, error },
+        'Critical: Failed to send failure alert'
+      );
+    }
+  }
+
+  /**
+   * Send callback safely (never throws)
+   */
+  private async sendCallbackSafe(taskUuid: string): Promise<void> {
+    try {
+      await callbackService.sendCallback(taskUuid);
+    } catch (error) {
+      logger.error(
+        { taskUuid, error },
+        'Critical: Failed to send callback'
+      );
+    }
   }
 }
 
