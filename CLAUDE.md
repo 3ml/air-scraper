@@ -391,7 +391,8 @@ Sent to `CALLBACK_URL` on task completion. **The entire payload is encrypted wit
 
 **Headers:**
 - `x-scraper-secret: <SCRAPER_SECRET>` - Authentication
-- `x-request-id: <REQUEST_ID>` - Correlation ID
+- `x-task-id: <TASK_UUID>` - Unique task identifier (primary)
+- `x-request-id: <REQUEST_ID>` - Original request correlation ID
 
 **Decrypted payload structure:**
 ```json

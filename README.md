@@ -587,7 +587,8 @@ The callback payload sent to your endpoint is **encrypted** using the same AES-2
 
 **Headers received:**
 - `x-scraper-secret`: Verify this matches your `SCRAPER_SECRET`
-- `x-request-id`: Correlation ID for logging
+- `x-task-id`: Unique task identifier (UUID returned by trigger)
+- `x-request-id`: Original request correlation ID for logging
 
 ### Node.js Decryption
 

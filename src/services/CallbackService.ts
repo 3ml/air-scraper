@@ -62,6 +62,7 @@ export class CallbackService {
           headers: {
             'Content-Type': 'application/json',
             'x-scraper-secret': env.SCRAPER_SECRET,
+            'x-task-id': task.uuid,
             'x-request-id': task.requestId,
           },
           body: JSON.stringify({ data: encryptedPayload }),
