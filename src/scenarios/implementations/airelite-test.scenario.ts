@@ -135,12 +135,21 @@ export class AirEliteTestScenario extends BaseScenario<AirEliteTestInput, AirEli
         await engine.delay();
       }
 
-      // 3. Navigate to properties page
+      // 3. Navigate to properties page and wait for API response
+      // Start waiting for the properties API call BEFORE navigating
+      const propertiesApiPromise = page.waitForResponse(
+        (response) => response.url().includes('/api/') && response.status() === 200,
+        { timeout: 30000 }
+      ).catch(() => null);
+
       await engine.navigate(`${baseUrl}/dashboard/properties`);
+
+      // Wait for API call to complete
+      await propertiesApiPromise;
       await engine.delay();
 
-      // Wait for properties to load (wait for any link to /dashboard/properties/)
-      await page.waitForSelector('a[href*="/dashboard/properties/"]', { timeout: 30000 }).catch(() => {});
+      // Also wait for the property cards to render
+      await page.waitForSelector('a[href*="/dashboard/properties/"]', { timeout: 10000 }).catch(() => {});
       await engine.delay();
 
       // 4. Extract properties using page.evaluate()
