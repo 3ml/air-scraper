@@ -23,11 +23,21 @@ export class AlertService {
       timestamp: new Date().toISOString(),
     };
 
+    // Resolve taskId from UUID to integer ID
+    let taskIdInt: number | null = null;
+    if (payload.taskId) {
+      const task = await db.query.tasks.findFirst({
+        where: (t, { eq }) => eq(t.uuid, payload.taskId!),
+        columns: { id: true },
+      });
+      taskIdInt = task?.id ?? null;
+    }
+
     // Store alert in database
     const [alertRecord] = await db
       .insert(alerts)
       .values({
-        taskId: payload.taskId ? parseInt(payload.taskId) : null,
+        taskId: taskIdInt,
         alertType: payload.type,
         title: payload.title,
         message: payload.message,
