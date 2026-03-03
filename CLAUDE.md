@@ -39,6 +39,7 @@ air-scraper/
 │   │   ├── server.ts               # Fastify setup
 │   │   ├── routes/
 │   │   │   ├── trigger.ts          # POST /api/trigger
+│   │   │   ├── scenarios.ts        # GET /api/scenarios
 │   │   │   ├── health.ts           # GET /health
 │   │   │   ├── metrics.ts          # GET /metrics (Prometheus)
 │   │   │   └── admin.ts            # Admin API endpoints
@@ -171,11 +172,45 @@ Prometheus format metrics.
 - `GET /admin/stats` - Aggregated statistics
 - `POST /admin/tasks/:taskId/cancel` - Cancel pending task
 
+### GET /api/scenarios
+Returns all available scenarios with their JSON Schema documentation.
+
+```bash
+curl -X GET http://localhost:3000/api/scenarios \
+  -H "x-auth-token: <AUTH_TOKEN>"
+```
+
+Response (200 OK):
+```json
+{
+  "scenarios": [
+    {
+      "action": "test",
+      "name": "Test Scenario",
+      "description": "Simple test scenario...",
+      "inputSchema": { "type": "object", "properties": { ... } },
+      "outputSchema": { "type": "object", "properties": { ... } },
+      "exampleInput": { "url": "https://example.com" },
+      "limits": {
+        "maxConcurrent": 5,
+        "timeout": 60000,
+        "retries": 1
+      }
+    }
+  ],
+  "count": 2
+}
+```
+
+> **Note:** This endpoint auto-updates when scenarios are added/modified. The documentation is generated from scenario config at runtime.
+
 ---
 
 ## Adding New Scenarios
 
 **To add a specific scenario, create a file in `src/scenarios/implementations/` following the pattern of `test.scenario.ts` and register it in `src/scenarios/index.ts`.** The complete plan with all instructions is saved in `PIANO.md`.
+
+> **⚠️ IMPORTANT:** Every scenario MUST define `inputSchema`, `outputSchema`, and `exampleInput` in its config. This documentation is exposed via `GET /api/scenarios` and auto-updates when scenarios change.
 
 ### Step 1: Create Scenario File
 
@@ -205,6 +240,32 @@ export class MyScenario extends BaseScenario<MyInput, MyOutput> {
     maxConcurrent: 2,
     timeout: 120000,                 // 2 minutes
     retries: 3,
+    // REQUIRED: JSON Schema documentation for GET /api/scenarios
+    inputSchema: {
+      type: 'object',
+      required: ['url'],
+      properties: {
+        url: { type: 'string', format: 'uri', description: 'Target URL' },
+        credentials: {
+          type: 'object',
+          properties: {
+            username: { type: 'string' },
+            password: { type: 'string' },
+          },
+        },
+      },
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        extractedData: { type: 'string' },
+      },
+    },
+    exampleInput: {
+      url: 'https://target-site.com',
+      credentials: { username: 'user', password: 'pass' },
+    },
   };
 
   protected async run(
@@ -317,10 +378,22 @@ Persistent browser sessions for context reuse.
 
 ---
 
-## Callback Payload
+## Callback Payload (Encrypted)
 
-Sent to `CALLBACK_URL` on task completion:
+Sent to `CALLBACK_URL` on task completion. **The entire payload is encrypted with AES-256-GCM using `ENCRYPTION_SECRET`.**
 
+**Request Body:**
+```json
+{
+  "data": "BASE64_ENCRYPTED_PAYLOAD"
+}
+```
+
+**Headers:**
+- `x-scraper-secret: <SCRAPER_SECRET>` - Authentication
+- `x-request-id: <REQUEST_ID>` - Correlation ID
+
+**Decrypted payload structure:**
 ```json
 {
   "taskId": "uuid",
@@ -335,7 +408,7 @@ Sent to `CALLBACK_URL` on task completion:
 }
 ```
 
-Header: `x-scraper-secret: <SCRAPER_SECRET>`
+To decrypt, use the same `ENCRYPTION_SECRET` shared between client and server. See [README.md](./README.md#decrypting-callback-payload) for decryption examples.
 
 ---
 

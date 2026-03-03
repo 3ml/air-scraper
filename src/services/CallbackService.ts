@@ -3,6 +3,7 @@ import { db } from '../db/client.js';
 import { tasks } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import logger from '../observability/logger.js';
+import { encryptObject } from '../utils/encryption.js';
 import type { CallbackPayload } from '../types/api.types.js';
 
 const MAX_RETRIES = 3;
@@ -49,6 +50,9 @@ export class CallbackService {
       timestamp: new Date().toISOString(),
     };
 
+    // Encrypt entire payload
+    const encryptedPayload = encryptObject(payload);
+
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -60,7 +64,7 @@ export class CallbackService {
             'x-scraper-secret': env.SCRAPER_SECRET,
             'x-request-id': task.requestId,
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ data: encryptedPayload }),
         });
 
         if (response.ok) {

@@ -9,6 +9,10 @@ export interface ScenarioConfig {
   cooldownSeconds?: number;
   timeout?: number;
   retries?: number;
+  // JSON Schema documentation for API discovery
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  exampleInput?: Record<string, unknown>;
 }
 
 export interface ScenarioContext {

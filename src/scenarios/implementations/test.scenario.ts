@@ -25,6 +25,34 @@ export class TestScenario extends BaseScenario<TestInput, TestOutput> {
     cooldownSeconds: 0,
     timeout: 60000,
     retries: 1,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          format: 'uri',
+          description: 'URL to navigate to (default: https://example.com)',
+        },
+        message: {
+          type: 'string',
+          description: 'Optional message to include in the output',
+        },
+      },
+    },
+    outputSchema: {
+      type: 'object',
+      required: ['title', 'url', 'timestamp'],
+      properties: {
+        title: { type: 'string', description: 'Page title' },
+        url: { type: 'string', format: 'uri', description: 'Final URL after navigation' },
+        timestamp: { type: 'string', format: 'date-time', description: 'Execution timestamp' },
+        message: { type: 'string', description: 'Echo of input message if provided' },
+      },
+    },
+    exampleInput: {
+      url: 'https://example.com',
+      message: 'Hello from test',
+    },
   };
 
   protected async run(

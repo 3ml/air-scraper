@@ -116,3 +116,29 @@ export interface AdminStatsResponse {
     lastHour: number;
   };
 }
+
+// Scenario documentation for GET /api/scenarios
+export interface ScenarioDocumentation {
+  action: string;
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  exampleInput?: Record<string, unknown>;
+  limits: {
+    maxConcurrent?: number;
+    cooldownSeconds?: number;
+    timeout?: number;
+    retries?: number;
+  };
+}
+
+export interface ScenariosResponse {
+  scenarios: ScenarioDocumentation[];
+  count: number;
+}
+
+// Encrypted callback wrapper sent to external endpoint
+export interface EncryptedCallbackPayload {
+  data: string; // Base64 encrypted JSON containing CallbackPayload
+}

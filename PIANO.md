@@ -182,8 +182,20 @@ curl -X POST http://localhost:3000/api/trigger \
 
 ## Callback di Fine Elaborazione
 
-Al termine di ogni task (successo o fallimento), viene inviato un POST a `CALLBACK_URL`:
+Al termine di ogni task (successo o fallimento), viene inviato un POST criptato a `CALLBACK_URL`:
 
+**Request Body (criptato con AES-256-GCM):**
+```json
+{
+  "data": "BASE64_ENCRYPTED_PAYLOAD"
+}
+```
+
+**Headers:**
+- `x-scraper-secret: <SCRAPER_SECRET>`
+- `x-request-id: <REQUEST_ID>`
+
+**Payload decriptato:**
 ```json
 {
   "taskId": "uuid",
@@ -198,7 +210,7 @@ Al termine di ogni task (successo o fallimento), viene inviato un POST a `CALLBA
 }
 ```
 
-Header: `x-scraper-secret: <SCRAPER_SECRET>`
+Per decriptare usare `ENCRYPTION_SECRET` condiviso. Vedi README.md per esempi.
 
 ---
 

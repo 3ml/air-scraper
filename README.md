@@ -355,12 +355,22 @@ rsync -avz /var/lib/air-scraper/ user@backup-server:/backups/air-scraper/
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/trigger` | POST | Trigger a scraping scenario |
+| `/api/scenarios` | GET | List all scenarios with JSON Schema documentation |
 | `/api/tasks/:id` | GET | Get task status |
 | `/health` | GET | Health check |
 | `/metrics` | GET | Prometheus metrics |
 | `/admin/tasks` | GET | List all tasks |
 | `/admin/logs` | GET | View logs |
 | `/admin/stats` | GET | Statistics |
+
+### Discover Available Scenarios
+
+```bash
+curl -X GET https://scraper.yourdomain.com/api/scenarios \
+  -H "x-auth-token: YOUR_AUTH_TOKEN"
+```
+
+Returns all scenarios with their input/output JSON Schema, example inputs, and rate limits.
 
 ### Trigger Request (Encrypted)
 
@@ -564,6 +574,145 @@ response = requests.post(
 
 ---
 
+## Decrypting Callback Payload
+
+The callback payload sent to your endpoint is **encrypted** using the same AES-256-GCM standard. Your server must decrypt it to access the task results.
+
+**Received format:**
+```json
+{
+  "data": "BASE64_ENCRYPTED_PAYLOAD"
+}
+```
+
+**Headers received:**
+- `x-scraper-secret`: Verify this matches your `SCRAPER_SECRET`
+- `x-request-id`: Correlation ID for logging
+
+### Node.js Decryption
+
+```javascript
+import { createDecipheriv, createHash } from 'crypto';
+
+const ENCRYPTION_SECRET = 'your-shared-secret';
+
+function decrypt(encryptedBase64) {
+  const key = createHash('sha256').update(ENCRYPTION_SECRET).digest();
+  const combined = Buffer.from(encryptedBase64, 'base64');
+
+  const iv = combined.subarray(0, 12);
+  const authTag = combined.subarray(12, 28);
+  const ciphertext = combined.subarray(28);
+
+  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(authTag);
+
+  let decrypted = decipher.update(ciphertext);
+  decrypted = Buffer.concat([decrypted, decipher.final()]);
+
+  return JSON.parse(decrypted.toString('utf8'));
+}
+
+// Express/Fastify handler example
+app.post('/scraper/callback', (req, res) => {
+  const secret = req.headers['x-scraper-secret'];
+  if (secret !== process.env.SCRAPER_SECRET) {
+    return res.status(401).send('Unauthorized');
+  }
+
+  const payload = decrypt(req.body.data);
+  // payload = { taskId, requestId, action, status, inputData, resultData, ... }
+
+  console.log('Task completed:', payload.taskId, payload.status);
+  res.status(200).send('OK');
+});
+```
+
+### PHP Decryption
+
+```php
+<?php
+$ENCRYPTION_SECRET = 'your-shared-secret';
+
+function decrypt($encryptedBase64) {
+    global $ENCRYPTION_SECRET;
+
+    $key = hash('sha256', $ENCRYPTION_SECRET, true);
+    $combined = base64_decode($encryptedBase64);
+
+    $iv = substr($combined, 0, 12);
+    $authTag = substr($combined, 12, 16);
+    $ciphertext = substr($combined, 28);
+
+    $decrypted = openssl_decrypt(
+        $ciphertext,
+        'aes-256-gcm',
+        $key,
+        OPENSSL_RAW_DATA,
+        $iv,
+        $authTag
+    );
+
+    return json_decode($decrypted, true);
+}
+
+// Laravel example
+public function handleCallback(Request $request) {
+    $secret = $request->header('x-scraper-secret');
+    if ($secret !== config('scraper.secret')) {
+        return response('Unauthorized', 401);
+    }
+
+    $payload = decrypt($request->input('data'));
+    // $payload = ['taskId' => ..., 'resultData' => [...], ...]
+
+    Log::info('Scraper callback', ['taskId' => $payload['taskId']]);
+    return response('OK', 200);
+}
+```
+
+### Python Decryption
+
+```python
+import base64
+import hashlib
+import json
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+ENCRYPTION_SECRET = 'your-shared-secret'
+
+def decrypt(encrypted_base64: str) -> dict:
+    key = hashlib.sha256(ENCRYPTION_SECRET.encode()).digest()
+    combined = base64.b64decode(encrypted_base64)
+
+    iv = combined[:12]
+    auth_tag = combined[12:28]
+    ciphertext = combined[28:]
+
+    # cryptography expects tag appended to ciphertext
+    ciphertext_with_tag = ciphertext + auth_tag
+
+    aesgcm = AESGCM(key)
+    decrypted = aesgcm.decrypt(iv, ciphertext_with_tag, None)
+
+    return json.loads(decrypted.decode())
+
+# Flask example
+@app.route('/scraper/callback', methods=['POST'])
+def handle_callback():
+    secret = request.headers.get('x-scraper-secret')
+    if secret != os.environ['SCRAPER_SECRET']:
+        return 'Unauthorized', 401
+
+    payload = decrypt(request.json['data'])
+    # payload = {'taskId': ..., 'resultData': {...}, ...}
+
+    print(f"Task {payload['taskId']} completed with status {payload['status']}")
+    return 'OK', 200
+```
+
+---
+
 ## Troubleshooting
 
 ### Browser won't launch
@@ -609,7 +758,7 @@ pm2 restart air-scraper
 |----------|-------|
 | **Server IP** | `77.42.80.187` |
 | **API URL** | `https://scraper.airelite.it/api/trigger` |
-| **Port** | `3322` |
+| **Port** | `3000` |
 | **App Directory** | `/opt/air-scraper` |
 
 ### DNS Configuration
@@ -623,7 +772,7 @@ scraper.airelite.it  →  77.42.80.187
 
 ```caddyfile
 scraper.airelite.it {
-    reverse_proxy localhost:3322
+    reverse_proxy localhost:3000
 
     header {
         -Server

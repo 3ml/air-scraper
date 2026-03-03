@@ -1,4 +1,5 @@
 import type { BaseScenario, ScenarioConfig } from './BaseScenario.js';
+import type { ScenarioDocumentation } from '../types/api.types.js';
 import logger from '../observability/logger.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,6 +64,29 @@ class ScenarioRegistry {
    */
   getActions(): string[] {
     return Array.from(this.scenarios.keys());
+  }
+
+  /**
+   * Get documentation for all scenarios (for API discovery endpoint)
+   */
+  getDocumentation(): ScenarioDocumentation[] {
+    return Array.from(this.instances.values()).map((scenario) => {
+      const config = scenario.getConfig();
+      return {
+        action: config.action,
+        name: config.name,
+        description: config.description,
+        inputSchema: config.inputSchema,
+        outputSchema: config.outputSchema,
+        exampleInput: config.exampleInput,
+        limits: {
+          maxConcurrent: config.maxConcurrent,
+          cooldownSeconds: config.cooldownSeconds,
+          timeout: config.timeout,
+          retries: config.retries,
+        },
+      };
+    });
   }
 
   /**

@@ -47,6 +47,60 @@ export class AirEliteTestScenario extends BaseScenario<AirEliteTestInput, AirEli
     cooldownSeconds: 5,
     timeout: 120000,
     retries: 2,
+    inputSchema: {
+      type: 'object',
+      required: ['username', 'password'],
+      properties: {
+        username: { type: 'string', description: 'Email for AirElite login' },
+        password: { type: 'string', description: 'Password for AirElite login' },
+        baseUrl: {
+          type: 'string',
+          format: 'uri',
+          description: 'Base URL (default: https://app.airelite.it)',
+        },
+      },
+    },
+    outputSchema: {
+      type: 'object',
+      required: ['success', 'properties', 'totalCount', 'timestamp'],
+      properties: {
+        success: { type: 'boolean', description: 'Whether extraction was successful' },
+        properties: {
+          type: 'array',
+          description: 'List of extracted properties',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'number', description: 'Property ID' },
+              name: { type: 'string', description: 'Property name' },
+              address: { type: 'string', description: 'Property address' },
+              owner: {
+                type: ['object', 'null'],
+                properties: {
+                  name: { type: 'string' },
+                  id: { type: 'number' },
+                },
+              },
+              smoobuId: { type: ['string', 'null'], description: 'Smoobu integration ID' },
+              vikeyId: { type: ['string', 'null'], description: 'Vikey integration ID' },
+              city: { type: ['string', 'null'] },
+              province: { type: ['string', 'null'] },
+              beds: { type: ['number', 'null'] },
+              baths: { type: ['number', 'null'] },
+              sqm: { type: ['number', 'null'] },
+              status: { type: 'string' },
+            },
+          },
+        },
+        totalCount: { type: 'number', description: 'Total number of properties found' },
+        timestamp: { type: 'string', format: 'date-time', description: 'Extraction timestamp' },
+        error: { type: 'string', description: 'Error message if success is false' },
+      },
+    },
+    exampleInput: {
+      username: 'user@example.com',
+      password: 'your-password',
+    },
   };
 
   protected async run(

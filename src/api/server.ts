@@ -8,6 +8,7 @@ import { healthRoutes } from './routes/health.js';
 import { metricsRoutes } from './routes/metrics.js';
 import { triggerRoutes } from './routes/trigger.js';
 import { adminRoutes } from './routes/admin.js';
+import { scenariosRoutes } from './routes/scenarios.js';
 
 export async function createServer() {
   const fastify = Fastify({
@@ -78,6 +79,7 @@ export async function createServer() {
   await fastify.register(metricsRoutes);
   await fastify.register(triggerRoutes);
   await fastify.register(adminRoutes);
+  await fastify.register(scenariosRoutes);
 
   // Root endpoint
   fastify.get('/', async () => {
