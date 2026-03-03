@@ -39,3 +39,6 @@ coverage/
 # Dashboard build
 dashboard/dist/
 dashboard/node_modules/
+
+# Build-time generated
+src/build-info.json

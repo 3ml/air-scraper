@@ -33,6 +33,9 @@ export interface HealthResponse {
   timestamp: string;
   uptime: number;
   version: string;
+  gitCommit?: string;
+  gitBranch?: string;
+  buildTime?: string;
   checks: {
     database: boolean;
     browserPool: number;
