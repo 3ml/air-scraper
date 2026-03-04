@@ -71,7 +71,9 @@ air-scraper/
 │   │   ├── registry.ts             # Scenario registration
 │   │   ├── index.ts                # Exports + auto-registration
 │   │   └── implementations/        # Actual scenarios
-│   │       └── test.scenario.ts    # Example test scenario
+│   │       ├── test.scenario.ts    # Example test scenario
+│   │       ├── airelite-test.scenario.ts  # AirElite properties extraction
+│   │       └── vikey.scenario.ts   # Vikey reservation data extraction
 │   ├── queue/
 │   │   ├── TaskQueue.ts            # Priority queue
 │   │   └── TaskWorker.ts           # Worker with retry logic
@@ -328,6 +330,74 @@ curl -X POST http://localhost:3000/api/trigger \
     }
   }'
 ```
+
+---
+
+## Available Scenarios
+
+### `vikey` - Vikey Reservation Scraper
+
+Extracts reservation data from Vikey (my.vikey.it) including guest information, billing data, contract status, and guest documents.
+
+**Input:**
+```json
+{
+  "vikeyId": "F5G84USP",
+  "credentials": {
+    "username": "user@example.com",
+    "password": "your-password"
+  }
+}
+```
+
+**Output includes:**
+- `telefonoOspite` - Guest phone number
+- `numeroOspiti` - Number of guests
+- `linguaOspite` - Guest language
+- `guestFilledData` - Guest-filled data (nome, cognome, email)
+- `billingData` - Billing info (nome, partitaIvaCf, passaporto, paese, codiceUnivocoSid, pec, cap, citta, provincia, indirizzo)
+- `contractStatus` - Contract status text
+- `contractSigned` - Boolean indicating if contract is signed
+- `cityTaxStatus` - City tax status
+- `guests` - Array of guest documents with:
+  - `nome`, `cognome`, `sesso`, `dataNascita`, `luogoNascita`
+  - `cittadinanza`, `tipoDocumento`, `numeroDocumento`
+  - `rilasciatoDa`, `dataRilascio`, `dataScadenza`
+  - `residenza`, `indirizzoResidenza`
+
+**File:** `src/scenarios/implementations/vikey.scenario.ts`
+
+### `airelite-test` - AirElite Properties Scraper
+
+Logs into AirElite dashboard and extracts properties list with owner information.
+
+**Input:**
+```json
+{
+  "username": "user@example.com",
+  "password": "your-password"
+}
+```
+
+**Output:** List of properties with id, name, address, owner, smoobuId, vikeyId, city, province, beds, baths, sqm, status.
+
+**File:** `src/scenarios/implementations/airelite-test.scenario.ts`
+
+### `test` - Test Scenario
+
+Simple test scenario to validate the scraping system.
+
+**Input:**
+```json
+{
+  "url": "https://example.com",
+  "message": "Hello from test"
+}
+```
+
+**Output:** Page title, URL, timestamp, optional message.
+
+**File:** `src/scenarios/implementations/test.scenario.ts`
 
 ---
 
