@@ -186,7 +186,7 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
       if (emailFieldVisible) {
         // Fill login form with humanized typing
         await engine.think();
-        await engine.type('input[type="text"], input[name="email"]', credentials.username);
+        await engine.type('input[type="email"], input[type="text"], input[name="email"]', credentials.username);
         await engine.type('input[type="password"]', credentials.password);
 
         // Click login button
