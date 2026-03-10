@@ -214,18 +214,18 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
       await engine.delay();
 
       // 4. Wait for page content to render
-      await page.waitForSelector('div:has-text("Informazioni generali")', { timeout: 15000 }).catch(() => {});
+      await page.getByText('Informazioni generali').first().waitFor({ timeout: 15000 }).catch(() => {});
       await engine.delay();
 
       // 5. Extract general page data
       const generalData = await this.extractGeneralPageData(engine);
 
-      // 6. Navigate to documents tab
-      await page.click('div:has-text("Documenti e Burocrazia")');
+      // 6. Navigate to documents tab using exact text match
+      await page.getByText('Documenti e Burocrazia', { exact: true }).click();
       await engine.delay();
 
       // Wait for documents section to load
-      await page.waitForSelector('div:has-text("Documenti")', { timeout: 15000 }).catch(() => {});
+      await page.getByText('Burocrazia').first().waitFor({ timeout: 15000 }).catch(() => {});
       await engine.delay();
 
       // 7. Extract guest documents
@@ -294,65 +294,71 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         return trimmed;
       };
 
-      // Helper function to extract label-value pairs
-      const extractLabelValue = (labelText: string): string | null => {
-        const allDivs = document.querySelectorAll('div');
-        for (const div of allDivs) {
-          if (div.textContent?.trim() === labelText && div.children.length === 0) {
-            // Check next sibling
-            const nextEl = div.nextElementSibling;
-            if (nextEl) {
-              return normalize(nextEl.textContent);
-            }
-            // Check parent's next child
-            const parent = div.parentElement;
-            if (parent) {
-              const siblings = Array.from(parent.children);
-              const idx = siblings.indexOf(div);
-              if (idx >= 0 && idx < siblings.length - 1) {
-                return normalize(siblings[idx + 1].textContent);
-              }
-            }
+      // Build a map of all label-value pairs from the page
+      // The structure is: container div > label div + value div (as siblings)
+      const fieldMap: Record<string, string> = {};
+      const allElements = document.querySelectorAll('div');
+
+      for (const el of allElements) {
+        const children = Array.from(el.children);
+        // Look for containers with exactly 2 div children (label + value pattern)
+        if (children.length === 2 &&
+            children[0].tagName === 'DIV' &&
+            children[1].tagName === 'DIV') {
+          const label = children[0].textContent?.trim();
+          const value = children[1].textContent?.trim();
+          if (label && value && !label.includes('\n') && label.length < 50) {
+            fieldMap[label] = value;
           }
         }
-        return null;
-      };
+      }
 
-      // Extract general info
-      const telefonoOspite = extractLabelValue('Telefono ospite');
-      const numeroOspiti = extractLabelValue('Numero ospiti');
-      const linguaOspite = extractLabelValue('Lingua ospite');
+      // Extract general info from the map
+      const telefonoOspite = normalize(fieldMap['Telefono ospite']);
+      const numeroOspiti = normalize(fieldMap['Numero ospiti']);
+      const linguaOspite = normalize(fieldMap['Lingua ospite']);
 
-      // Find "Dati riempiti dall'ospite" section and extract
+      // Find "Dati riempiti dall'ospite" section
       const guestFilledData: GuestFilledData = {
         nome: null,
         cognome: null,
         email: null,
       };
 
-      const guestSectionHeader = Array.from(document.querySelectorAll('div')).find(
-        (d) => d.textContent?.trim() === "Dati riempiti dall'ospite"
-      );
-      if (guestSectionHeader) {
-        const section = guestSectionHeader.parentElement;
-        if (section) {
-          const findInSection = (label: string): string | null => {
-            const divs = section.querySelectorAll('div');
-            for (const div of divs) {
-              if (div.textContent?.trim() === label && div.children.length === 0) {
-                const next = div.nextElementSibling;
-                if (next) return normalize(next.textContent);
+      // Look for section header and extract from its parent container
+      const findSectionData = (sectionTitle: string): Record<string, string> => {
+        const data: Record<string, string> = {};
+        for (const el of allElements) {
+          if (el.textContent?.trim() === sectionTitle && el.children.length === 0) {
+            // Found the header, now look at parent's siblings or children
+            const section = el.parentElement;
+            if (section) {
+              const sectionDivs = section.querySelectorAll('div');
+              for (const div of sectionDivs) {
+                const divChildren = Array.from(div.children);
+                if (divChildren.length === 2 &&
+                    divChildren[0].tagName === 'DIV' &&
+                    divChildren[1].tagName === 'DIV') {
+                  const label = divChildren[0].textContent?.trim();
+                  const value = divChildren[1].textContent?.trim();
+                  if (label && value) {
+                    data[label] = value;
+                  }
+                }
               }
             }
-            return null;
-          };
-          guestFilledData.nome = findInSection('Nome');
-          guestFilledData.cognome = findInSection('Cognome');
-          guestFilledData.email = findInSection('Email');
+            break;
+          }
         }
-      }
+        return data;
+      };
 
-      // Find "Dati di fatturazione" section and extract
+      const guestSection = findSectionData("Dati riempiti dall'ospite");
+      guestFilledData.nome = normalize(guestSection['Nome']);
+      guestFilledData.cognome = normalize(guestSection['Cognome']);
+      guestFilledData.email = normalize(guestSection['Email']);
+
+      // Find "Dati di fatturazione" section
       const billingData: BillingData = {
         nome: null,
         partitaIvaCf: null,
@@ -366,71 +372,45 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         indirizzo: null,
       };
 
-      const billingSectionHeader = Array.from(document.querySelectorAll('div')).find(
-        (d) => d.textContent?.trim() === 'Dati di fatturazione'
-      );
-      if (billingSectionHeader) {
-        const section = billingSectionHeader.parentElement;
-        if (section) {
-          const findInSection = (label: string): string | null => {
-            const divs = section.querySelectorAll('div');
-            for (const div of divs) {
-              if (div.textContent?.trim() === label && div.children.length === 0) {
-                const next = div.nextElementSibling;
-                if (next) return normalize(next.textContent);
-              }
-            }
-            return null;
-          };
-          billingData.nome = findInSection('Nome');
-          billingData.partitaIvaCf = findInSection('Partita Iva/Codice fiscale');
-          billingData.passaporto = findInSection('Passaporto');
-          billingData.paese = findInSection('Paese');
-          billingData.codiceUnivocoSid = findInSection('Codice univoco SID');
-          billingData.pec = findInSection('PEC');
-          billingData.cap = findInSection('CAP');
-          billingData.citta = findInSection('Città');
-          billingData.provincia = findInSection('Provincia');
-          billingData.indirizzo = findInSection('Indirizzo');
-        }
-      }
+      const billingSection = findSectionData('Dati di fatturazione');
+      billingData.nome = normalize(billingSection['Nome']);
+      billingData.partitaIvaCf = normalize(billingSection['Partita Iva/Codice fiscale']);
+      billingData.passaporto = normalize(billingSection['Passaporto']);
+      billingData.paese = normalize(billingSection['Paese']);
+      billingData.codiceUnivocoSid = normalize(billingSection['Codice univoco SID']);
+      billingData.pec = normalize(billingSection['PEC']);
+      billingData.cap = normalize(billingSection['CAP']);
+      billingData.citta = normalize(billingSection['Città']);
+      billingData.provincia = normalize(billingSection['Provincia']);
+      billingData.indirizzo = normalize(billingSection['Indirizzo']);
 
-      // Extract contract status
+      // Extract contract status - look for "Contratto firmato" text anywhere in the page
       let contractStatus: string | null = null;
       let contractSigned = false;
 
-      const contractLabel = Array.from(document.querySelectorAll('div')).find(
-        (d) => d.textContent?.trim() === 'Accettazione contratto'
-      );
-      if (contractLabel) {
-        const section = contractLabel.parentElement;
-        if (section) {
-          const fullText = section.textContent || '';
-          if (fullText.includes('Contratto firmato')) {
-            contractStatus = 'Contratto firmato dall\'ospite';
-            contractSigned = true;
-          } else if (fullText.includes('Non hai richiesto')) {
-            contractStatus = 'Non richiesto';
-          } else {
-            // Extract any status text
-            const statusText = fullText.replace('Accettazione contratto', '').trim();
-            contractStatus = statusText || null;
-          }
+      const pageText = document.body.textContent || '';
+      if (pageText.includes('Contratto firmato dall\'ospite') || pageText.includes("Contratto firmato dall'ospite")) {
+        contractStatus = "Contratto firmato dall'ospite";
+        contractSigned = true;
+      } else if (pageText.includes('Non hai richiesto la firma')) {
+        contractStatus = 'Non richiesto';
+      } else {
+        // Check for other contract-related text
+        const contractSection = findSectionData('Accettazione contratto');
+        if (Object.keys(contractSection).length > 0) {
+          contractStatus = Object.values(contractSection).join(' ');
         }
       }
 
       // Extract city tax status
       let cityTaxStatus: string | null = null;
-      const taxLabel = Array.from(document.querySelectorAll('div')).find(
-        (d) => d.textContent?.trim() === 'Tassa di soggiorno'
-      );
-      if (taxLabel) {
-        const section = taxLabel.parentElement;
-        if (section) {
-          const next = taxLabel.nextElementSibling;
-          if (next) {
-            cityTaxStatus = normalize(next.textContent);
-          }
+      const taxValue = fieldMap['Tassa di soggiorno'];
+      if (taxValue) {
+        cityTaxStatus = normalize(taxValue);
+      } else {
+        // Look for tax-related text in the page
+        if (pageText.includes('Non hai richiesto il pagamento della tassa di soggiorno')) {
+          cityTaxStatus = 'Non richiesto';
         }
       }
 
@@ -459,79 +439,90 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         return trimmed;
       };
 
-      // Find all guest cards - they have "Nome ospite:" text
+      // The guest card structure is:
+      // - Container div
+      //   - Header div with "Nome ospite: XXX" and "Cognome ospite: YYY" as text nodes
+      //   - Data div containing all field pairs (Sesso, Data di nascita, etc.)
+
       const allDivs = document.querySelectorAll('div');
-      const guestCards: Element[] = [];
+      const processedCards = new Set<Element>();
 
       for (const div of allDivs) {
-        const text = div.textContent || '';
-        // Look for divs that contain guest name headers like "Nome ospite: XXX" and "Cognome ospite: YYY"
-        if (text.includes('Nome ospite:') && text.includes('Cognome ospite:') && text.includes('Sesso')) {
-          // Check this is a card container (not a parent that contains multiple)
-          const childCards = div.querySelectorAll('div');
+        // Skip already processed
+        if (processedCards.has(div)) continue;
+
+        const directText = div.textContent || '';
+
+        // Look for divs containing the guest header pattern
+        // The header contains text like "Nome ospite: Laura" and "Cognome ospite: Di Fabio"
+        if (directText.includes('Nome ospite:') && directText.includes('Cognome ospite:')) {
+          // Find the smallest container that has both the header and Sesso field
+          if (!directText.includes('Sesso')) continue;
+
+          // Check if this is a leaf card (doesn't contain other cards)
           let isLeafCard = true;
-          for (const child of childCards) {
-            if (child !== div && child.textContent?.includes('Nome ospite:') && child.textContent?.includes('Sesso')) {
+          const childDivs = div.querySelectorAll('div');
+          for (const child of childDivs) {
+            if (child !== div &&
+                child.textContent?.includes('Nome ospite:') &&
+                child.textContent?.includes('Cognome ospite:') &&
+                child.textContent?.includes('Sesso')) {
               isLeafCard = false;
               break;
             }
           }
-          if (isLeafCard) {
-            guestCards.push(div);
-          }
-        }
-      }
 
-      // If no cards found with full structure, try alternative approach
-      if (guestCards.length === 0) {
-        // Look for sections with "Nome ospite:" header
-        for (const div of allDivs) {
-          if (div.textContent?.trim().startsWith('Nome ospite:')) {
-            const parent = div.parentElement?.parentElement;
-            if (parent && parent.textContent?.includes('Sesso') && !guestCards.includes(parent)) {
-              guestCards.push(parent);
+          if (!isLeafCard) continue;
+          processedCards.add(div);
+
+          // Extract nome and cognome from header text
+          let nome: string | null = null;
+          let cognome: string | null = null;
+
+          // Find the header element with "Nome ospite:" text
+          for (const el of childDivs) {
+            const elText = el.textContent || '';
+            if (elText.includes('Nome ospite:') && elText.includes('Cognome ospite:') && !elText.includes('Sesso')) {
+              // Parse "Nome ospite: Laura" and "Cognome ospite: Di Fabio"
+              const nomeMatch = elText.match(/Nome ospite:\s*([^C]+)/);
+              const cognomeMatch = elText.match(/Cognome ospite:\s*(.+?)$/);
+              if (nomeMatch) nome = normalize(nomeMatch[1]);
+              if (cognomeMatch) cognome = normalize(cognomeMatch[1]);
+              break;
             }
           }
-        }
-      }
 
-      // Extract data from each guest card
-      for (const card of guestCards) {
-        const extractField = (label: string): string | null => {
-          const divs = card.querySelectorAll('div');
-          for (const div of divs) {
-            if (div.textContent?.trim() === label && div.children.length === 0) {
-              const next = div.nextElementSibling;
-              if (next) return normalize(next.textContent);
+          // Build field map from the card
+          const fieldMap: Record<string, string> = {};
+          for (const el of childDivs) {
+            const children = Array.from(el.children);
+            if (children.length === 2 &&
+                children[0].tagName === 'DIV' &&
+                children[1].tagName === 'DIV') {
+              const label = children[0].textContent?.trim();
+              const value = children[1].textContent?.trim();
+              if (label && value && !label.includes('\n')) {
+                fieldMap[label] = value;
+              }
             }
           }
-          return null;
-        };
 
-        // Extract name from header
-        let nome: string | null = null;
-        let cognome: string | null = null;
-        const cardText = card.textContent || '';
-        const nomeMatch = cardText.match(/Nome ospite:\s*([^\n]+)/);
-        const cognomeMatch = cardText.match(/Cognome ospite:\s*([^\n]+)/);
-        if (nomeMatch) nome = normalize(nomeMatch[1].split('Cognome')[0]);
-        if (cognomeMatch) cognome = normalize(cognomeMatch[1].split('Sesso')[0]);
-
-        guests.push({
-          nome,
-          cognome,
-          sesso: extractField('Sesso'),
-          dataNascita: extractField('Data di nascita'),
-          luogoNascita: extractField('Luogo di nascita'),
-          cittadinanza: extractField('Cittadinanza'),
-          tipoDocumento: extractField('Tipo documento'),
-          numeroDocumento: extractField('Numero documento'),
-          rilasciatoDa: extractField('Rilasciato da'),
-          dataRilascio: extractField('Data di rilascio'),
-          dataScadenza: extractField('Data di scadenza'),
-          residenza: extractField('Residenza'),
-          indirizzoResidenza: extractField('Indirizzo di residenza'),
-        });
+          guests.push({
+            nome,
+            cognome,
+            sesso: normalize(fieldMap['Sesso']),
+            dataNascita: normalize(fieldMap['Data di nascita']),
+            luogoNascita: normalize(fieldMap['Luogo di nascita']),
+            cittadinanza: normalize(fieldMap['Cittadinanza']),
+            tipoDocumento: normalize(fieldMap['Tipo documento']),
+            numeroDocumento: normalize(fieldMap['Numero documento']),
+            rilasciatoDa: normalize(fieldMap['Rilasciato da']),
+            dataRilascio: normalize(fieldMap['Data di rilascio']),
+            dataScadenza: normalize(fieldMap['Data di scadenza']),
+            residenza: normalize(fieldMap['Residenza']),
+            indirizzoResidenza: normalize(fieldMap['Indirizzo di residenza']),
+          });
+        }
       }
 
       return guests;
