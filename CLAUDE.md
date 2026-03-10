@@ -122,89 +122,20 @@ air-scraper/
 
 ## API Reference
 
-### POST /api/trigger
-Trigger a scraping scenario. **The `action` and `data` fields must be encrypted using AES-256-GCM.**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/trigger` | POST | Trigger scenario (action + data encrypted with AES-256-GCM) |
+| `/api/tasks/:taskId` | GET | Get task status |
+| `/api/scenarios` | GET | List all scenarios with JSON Schema docs (auto-generated) |
+| `/health` | GET | Health check |
+| `/metrics` | GET | Prometheus metrics |
+| `/admin/tasks` | GET | List tasks with pagination/filters |
+| `/admin/tasks/:taskId` | GET | Task details with logs |
+| `/admin/logs` | GET | Log viewer with filters |
+| `/admin/stats` | GET | Aggregated statistics |
+| `/admin/tasks/:taskId/cancel` | POST | Cancel pending task |
 
-```bash
-curl -X POST http://localhost:3000/api/trigger \
-  -H "Content-Type: application/json" \
-  -H "x-auth-token: <AUTH_TOKEN>" \
-  -d '{
-    "action": "BASE64_ENCRYPTED_ACTION",
-    "data": "BASE64_ENCRYPTED_DATA_JSON",
-    "priority": 5,
-    "callbackUrl": "https://optional-callback.com"
-  }'
-```
-
-Response (202 Accepted):
-```json
-{
-  "taskId": "uuid",
-  "status": "pending",
-  "message": "Task queued for action: scenario_name"
-}
-```
-
-### Encryption Format
-
-| Parameter | Value |
-|-----------|-------|
-| Algorithm | AES-256-GCM |
-| Key Derivation | SHA-256 hash of `ENCRYPTION_SECRET` |
-| IV Length | 12 bytes |
-| Auth Tag Length | 16 bytes |
-| Output | `base64(IV + AuthTag + Ciphertext)` |
-
-See [README.md](./README.md#encryption-guide-for-api-clients) for encryption examples in Node.js, PHP, and Python.
-
-### GET /api/tasks/:taskId
-Get task status.
-
-### GET /health
-System health check.
-
-### GET /metrics
-Prometheus format metrics.
-
-### Admin Endpoints (require auth)
-- `GET /admin/tasks` - List tasks with pagination/filters
-- `GET /admin/tasks/:taskId` - Task details with logs
-- `GET /admin/logs` - Log viewer with filters
-- `GET /admin/stats` - Aggregated statistics
-- `POST /admin/tasks/:taskId/cancel` - Cancel pending task
-
-### GET /api/scenarios
-Returns all available scenarios with their JSON Schema documentation.
-
-```bash
-curl -X GET http://localhost:3000/api/scenarios \
-  -H "x-auth-token: <AUTH_TOKEN>"
-```
-
-Response (200 OK):
-```json
-{
-  "scenarios": [
-    {
-      "action": "test",
-      "name": "Test Scenario",
-      "description": "Simple test scenario...",
-      "inputSchema": { "type": "object", "properties": { ... } },
-      "outputSchema": { "type": "object", "properties": { ... } },
-      "exampleInput": { "url": "https://example.com" },
-      "limits": {
-        "maxConcurrent": 5,
-        "timeout": 60000,
-        "retries": 1
-      }
-    }
-  ],
-  "count": 2
-}
-```
-
-> **Note:** This endpoint auto-updates when scenarios are added/modified. The documentation is generated from scenario config at runtime.
+**Encryption:** AES-256-GCM, key = SHA-256 of `ENCRYPTION_SECRET`, output = `base64(IV[12] + AuthTag[16] + Ciphertext)`. See [README.md](./README.md#encryption-guide-for-api-clients) for examples.
 
 ---
 
@@ -361,9 +292,10 @@ Extracts reservation data from Vikey (my.vikey.it) including guest information, 
 - `cityTaxStatus` - City tax status
 - `guests` - Array of guest documents with:
   - `nome`, `cognome`, `sesso`, `dataNascita`, `luogoNascita`
-  - `cittadinanza`, `tipoDocumento`, `numeroDocumento`
-  - `rilasciatoDa`, `dataRilascio`, `dataScadenza`
-  - `residenza`, `indirizzoResidenza`
+  - `cittadinanza`, `residenza`, `indirizzoResidenza`
+  - `identityDocument` - Nested object with:
+    - `tipoDocumento`, `numeroDocumento`
+    - `rilasciatoDa`, `dataRilascio`, `dataScadenza`
 
 **File:** `src/scenarios/implementations/vikey.scenario.ts`
 
@@ -573,10 +505,16 @@ Verify `CALLBACK_URL` is reachable and `SCRAPER_SECRET` matches.
 
 ---
 
+## Production Deployment
+
+Server IP, domain, directory, DNS, and Caddy config are documented in [README.md → Production Deployment Info](./README.md#production-deployment-info).
+
+---
+
 ## References
 
 - [PIANO.md](./PIANO.md) - Full implementation plan with detailed specifications
-- [README.md](./README.md) - Setup and deployment instructions
+- [README.md](./README.md) - Setup, deployment, and production server details
 - [Playwright Docs](https://playwright.dev/docs/intro)
 - [Drizzle ORM](https://orm.drizzle.team/docs/overview)
 - [Fastify](https://fastify.dev/docs/latest/)

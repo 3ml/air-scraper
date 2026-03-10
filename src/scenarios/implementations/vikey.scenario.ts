@@ -28,6 +28,14 @@ interface BillingData {
   indirizzo: string | null;
 }
 
+interface IdentityDocument {
+  tipoDocumento: string | null;
+  numeroDocumento: string | null;
+  rilasciatoDa: string | null;
+  dataRilascio: string | null;
+  dataScadenza: string | null;
+}
+
 interface GuestDocument {
   nome: string | null;
   cognome: string | null;
@@ -35,13 +43,9 @@ interface GuestDocument {
   dataNascita: string | null;
   luogoNascita: string | null;
   cittadinanza: string | null;
-  tipoDocumento: string | null;
-  numeroDocumento: string | null;
-  rilasciatoDa: string | null;
-  dataRilascio: string | null;
-  dataScadenza: string | null;
   residenza: string | null;
   indirizzoResidenza: string | null;
+  identityDocument: IdentityDocument;
 }
 
 interface VikeyOutput {
@@ -136,13 +140,19 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
               dataNascita: { type: ['string', 'null'] },
               luogoNascita: { type: ['string', 'null'] },
               cittadinanza: { type: ['string', 'null'] },
-              tipoDocumento: { type: ['string', 'null'] },
-              numeroDocumento: { type: ['string', 'null'] },
-              rilasciatoDa: { type: ['string', 'null'] },
-              dataRilascio: { type: ['string', 'null'] },
-              dataScadenza: { type: ['string', 'null'] },
               residenza: { type: ['string', 'null'] },
               indirizzoResidenza: { type: ['string', 'null'] },
+              identityDocument: {
+                type: 'object',
+                description: 'Identity document details',
+                properties: {
+                  tipoDocumento: { type: ['string', 'null'] },
+                  numeroDocumento: { type: ['string', 'null'] },
+                  rilasciatoDa: { type: ['string', 'null'] },
+                  dataRilascio: { type: ['string', 'null'] },
+                  dataScadenza: { type: ['string', 'null'] },
+                },
+              },
             },
           },
         },
@@ -514,13 +524,15 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
             dataNascita: normalize(fieldMap['Data di nascita']),
             luogoNascita: normalize(fieldMap['Luogo di nascita']),
             cittadinanza: normalize(fieldMap['Cittadinanza']),
-            tipoDocumento: normalize(fieldMap['Tipo documento']),
-            numeroDocumento: normalize(fieldMap['Numero documento']),
-            rilasciatoDa: normalize(fieldMap['Rilasciato da']),
-            dataRilascio: normalize(fieldMap['Data di rilascio']),
-            dataScadenza: normalize(fieldMap['Data di scadenza']),
             residenza: normalize(fieldMap['Residenza']),
             indirizzoResidenza: normalize(fieldMap['Indirizzo di residenza']),
+            identityDocument: {
+              tipoDocumento: normalize(fieldMap['Tipo documento']),
+              numeroDocumento: normalize(fieldMap['Numero documento']),
+              rilasciatoDa: normalize(fieldMap['Rilasciato da']),
+              dataRilascio: normalize(fieldMap['Data di rilascio']),
+              dataScadenza: normalize(fieldMap['Data di scadenza']),
+            },
           });
         }
       }
