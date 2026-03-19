@@ -331,6 +331,41 @@ Simple test scenario to validate the scraping system.
 
 **File:** `src/scenarios/implementations/test.scenario.ts`
 
+### `html_to_pdf` - HTML to PDF Generator
+
+Renders self-contained HTML to PDF using Chromium's built-in PDF engine and uploads the result to an S3 presigned URL (Hetzner Object Storage).
+
+**Input:**
+```json
+{
+  "html": "<html><body><h1>Hello</h1></body></html>",
+  "uploadUrl": "https://s3.eu-central-003.hetzner.com/bucket/doc.pdf?X-Amz-Algorithm=...",
+  "pdfOptions": {
+    "format": "A4",
+    "orientation": "portrait",
+    "margins": { "top": "10mm", "right": "10mm", "bottom": "10mm", "left": "10mm" }
+  }
+}
+```
+
+- `html` (required) - Self-contained HTML string (inline CSS, base64 images)
+- `uploadUrl` (required) - S3 presigned PUT URL
+- `pdfOptions` (optional) - `format` (A4/Letter/Legal), `orientation` (portrait/landscape), `margins` (CSS units)
+
+**Output:**
+- `success` - Boolean
+- `fileSize` - PDF size in bytes
+- `uploadedTo` - The presigned URL used
+- `pageCount` - Number of pages
+- `timestamp` - ISO 8601
+
+**Notes:**
+- Requires `BROWSER_HEADLESS=true` (Chromium PDF generation only works in headless mode)
+- No S3 SDK needed — upload is a simple HTTP PUT to the presigned URL
+- Uses `printBackground: true` so CSS background colors/images are included
+
+**File:** `src/scenarios/implementations/html-to-pdf.scenario.ts`
+
 ---
 
 ## ScraperEngine Methods

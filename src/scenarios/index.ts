@@ -5,12 +5,14 @@ export { scenarioRegistry, RegisterScenario } from './registry.js';
 import { TestScenario } from './implementations/test.scenario.js';
 import { AirEliteTestScenario } from './implementations/airelite-test.scenario.js';
 import { VikeyScenario } from './implementations/vikey.scenario.js';
+import { HtmlToPdfScenario } from './implementations/html-to-pdf.scenario.js';
 import { scenarioRegistry } from './registry.js';
 
 // Register built-in scenarios
 scenarioRegistry.register(TestScenario);
 scenarioRegistry.register(AirEliteTestScenario);
 scenarioRegistry.register(VikeyScenario);
+scenarioRegistry.register(HtmlToPdfScenario);
 
 /**
  * Load custom scenarios dynamically (for future extensibility)
