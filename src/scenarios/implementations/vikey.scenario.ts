@@ -178,14 +178,20 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
     const baseUrl = 'https://my.vikey.it';
 
     try {
-      // 1. Navigate to reservation page
-      await engine.navigate(`${baseUrl}/reservations/${vikeyId}#general`);
-      await engine.delay();
-
       const page = engine.rawPage;
       if (!page) {
         throw new Error('Browser page not available');
       }
+
+      // NOTE: This scenario targets my.vikey.it, a login-protected SPA backed by a
+      // JSON API. It deliberately bypasses the engine's humanized methods (navigate/
+      // type/click/delay) and drives the raw Playwright page directly, using
+      // event-driven waits instead of fixed delays. This keeps the heavy anti-detection
+      // behavior intact for OTHER scenarios while making Vikey fast. See getWarmupUrl
+      // below: warmup is intentionally disabled for the same reason.
+
+      // 1. Navigate to reservation page (no pageLoadDelay / cookie-consent overhead)
+      await page.goto(`${baseUrl}/reservations/${vikeyId}#general`, { waitUntil: 'domcontentloaded' });
 
       // 2. Check if login is needed (redirected to login page)
       const emailFieldVisible = await page
@@ -194,25 +200,21 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         .catch(() => false);
 
       if (emailFieldVisible) {
-        // Fill login form with humanized typing
-        await engine.think();
-        await engine.type('input[type="email"], input[type="text"], input[name="email"]', credentials.username);
-        await engine.type('input[type="password"]', credentials.password);
+        // Fill login form instantly (no humanized typing)
+        await page.fill('input[type="email"], input[type="text"], input[name="email"]', credentials.username);
+        await page.fill('input[type="password"]', credentials.password);
 
-        // Click login button
-        await engine.click('button:has-text("Accedi")');
-        await engine.waitForNavigation();
-        await engine.delay();
+        // Submit and wait for the network to settle (event-driven)
+        await page.click('button:has-text("Accedi")');
+        await page.waitForLoadState('networkidle').catch(() => {});
 
         // After login, we may be redirected to dashboard - navigate back to reservation
-        const currentUrl = page.url();
-        if (!currentUrl.includes(`/reservations/${vikeyId}`)) {
-          await engine.navigate(`${baseUrl}/reservations/${vikeyId}#general`);
-          await engine.delay();
+        if (!page.url().includes(`/reservations/${vikeyId}`)) {
+          await page.goto(`${baseUrl}/reservations/${vikeyId}#general`, { waitUntil: 'domcontentloaded' });
         }
       }
 
-      // 3. Wait for reservation data API to load
+      // 3. Wait for reservation data API to load (this guarantees data is ready)
       await page
         .waitForResponse(
           (response) =>
@@ -221,22 +223,17 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         )
         .catch(() => null);
 
-      await engine.delay();
-
       // 4. Wait for page content to render
       await page.getByText('Informazioni generali').first().waitFor({ timeout: 15000 }).catch(() => {});
-      await engine.delay();
 
       // 5. Extract general page data
       const generalData = await this.extractGeneralPageData(engine);
 
       // 6. Navigate to documents tab using exact text match
       await page.getByText('Documenti e Burocrazia', { exact: true }).click();
-      await engine.delay();
 
-      // Wait for documents section to load
+      // Wait for documents section to load (event-driven)
       await page.getByText('Burocrazia').first().waitFor({ timeout: 15000 }).catch(() => {});
-      await engine.delay();
 
       // 7. Extract guest documents
       const guests = await this.extractGuestDocuments(engine);
@@ -541,9 +538,9 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
     });
   }
 
-  protected getWarmupUrl(_input: VikeyInput): string | undefined {
-    return 'https://my.vikey.it';
-  }
+  // Warmup intentionally disabled for Vikey: the homepage redirects to login and the
+  // warmup (random scroll + delays) wastes ~5-25s with no benefit. Falling back to the
+  // BaseScenario default (returns undefined) skips warmup entirely for this scenario only.
 }
 
 export default VikeyScenario;
