@@ -204,11 +204,16 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         await page.fill('input[type="email"], input[type="text"], input[name="email"]', credentials.username);
         await page.fill('input[type="password"]', credentials.password);
 
-        // Submit and wait for the network to settle (event-driven)
+        // Submit. Wait for the login form to go away (reliable "authenticated" signal).
+        // NOTE: do NOT use waitForLoadState('networkidle') here — this SPA keeps the
+        // network busy (polling/sockets) so networkidle never fires and hangs the task.
         await page.click('button:has-text("Accedi")');
-        await page.waitForLoadState('networkidle').catch(() => {});
+        await page
+          .getByRole('textbox', { name: 'Email' })
+          .waitFor({ state: 'detached', timeout: 30000 })
+          .catch(() => {});
 
-        // After login, we may be redirected to dashboard - navigate back to reservation
+        // After login, ensure we are on the reservation page (login may land on dashboard)
         if (!page.url().includes(`/reservations/${vikeyId}`)) {
           await page.goto(`${baseUrl}/reservations/${vikeyId}#general`, { waitUntil: 'domcontentloaded' });
         }
