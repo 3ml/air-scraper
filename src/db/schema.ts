@@ -6,6 +6,8 @@ export const tasks = sqliteTable('tasks', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   uuid: text('uuid').notNull().unique(),
   requestId: text('request_id').notNull(),
+  // Token ownership: scoped token name, NULL = master token (or pre-feature rows)
+  createdByToken: text('created_by_token'),
 
   // Scenario and input
   action: text('action').notNull(),

@@ -1,5 +1,11 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { env } from '../../config/env.js';
+import { resolveToken, type TokenContext } from './tokenResolver.js';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    tokenContext: TokenContext;
+  }
+}
 
 export async function authMiddleware(
   request: FastifyRequest,
@@ -15,20 +21,34 @@ export async function authMiddleware(
     return;
   }
 
-  if (token !== env.AUTH_TOKEN) {
+  const ctx = resolveToken(String(token));
+
+  if (!ctx) {
     reply.code(401).send({
       error: 'Unauthorized',
       message: 'Invalid authentication token',
     });
     return;
   }
+
+  request.tokenContext = ctx;
 }
 
-// Optional auth for admin routes (can be enhanced with sessions/JWT later)
+// Admin routes require the master token; scoped tokens are rejected.
 export async function adminAuthMiddleware(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
-  // For now, use the same token. Can be extended with separate admin auth.
-  return authMiddleware(request, reply);
+  await authMiddleware(request, reply);
+  if (reply.sent) {
+    return;
+  }
+
+  if (!request.tokenContext.isMaster) {
+    reply.code(403).send({
+      error: 'Forbidden',
+      code: 'ADMIN_ONLY',
+      message: 'Admin routes require the master token',
+    });
+  }
 }

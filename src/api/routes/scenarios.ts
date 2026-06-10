@@ -13,8 +13,11 @@ export async function scenariosRoutes(fastify: FastifyInstance): Promise<void> {
     {
       preHandler: authMiddleware,
     },
-    async (_request, reply) => {
-      const scenarios = scenarioRegistry.getDocumentation();
+    async (request, reply) => {
+      const all = scenarioRegistry.getDocumentation();
+      const ctx = request.tokenContext;
+      // Scoped tokens only see the scenarios they are allowed to trigger
+      const scenarios = ctx.isMaster ? all : all.filter((s) => ctx.scenarios.includes(s.action));
 
       const response: ScenariosResponse = {
         scenarios,

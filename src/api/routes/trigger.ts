@@ -8,6 +8,7 @@ import {
   type TriggerResponse,
 } from '../../types/api.types.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { canAccessScenario } from '../middleware/tokenResolver.js';
 import { createRequestLogger } from '../../observability/logger.js';
 import { incrementRequestCounter } from '../../observability/metrics.js';
 import { taskQueue } from '../../queue/TaskQueue.js';
@@ -70,6 +71,21 @@ export async function triggerRoutes(fastify: FastifyInstance): Promise<void> {
         }
 
         const { action, data, priority, callbackUrl } = parseResult.data;
+
+        // Scope check (must happen after decryption: action is not visible to middleware)
+        if (!canAccessScenario(request.tokenContext, action)) {
+          incrementRequestCounter(false);
+          logger.warn(
+            { action, tokenName: request.tokenContext.name },
+            'Token not allowed for scenario'
+          );
+          return reply.code(403).send({
+            error: 'Forbidden',
+            code: 'SCENARIO_NOT_ALLOWED',
+            message: `Token '${request.tokenContext.name}' is not allowed to trigger scenario '${action}'`,
+          });
+        }
+
         const taskUuid = uuidv4();
 
         logger.info({ action, taskUuid }, 'Creating new task');
@@ -78,6 +94,7 @@ export async function triggerRoutes(fastify: FastifyInstance): Promise<void> {
         await db.insert(tasks).values({
           uuid: taskUuid,
           requestId: request.requestId,
+          createdByToken: request.tokenContext.isMaster ? null : request.tokenContext.name,
           action,
           inputData: JSON.stringify(data),
           priority: priority ?? 5,
@@ -128,6 +145,16 @@ export async function triggerRoutes(fastify: FastifyInstance): Promise<void> {
         });
 
         if (!task) {
+          return reply.code(404).send({
+            error: 'Not Found',
+            message: `Task ${taskId} not found`,
+          });
+        }
+
+        // Ownership check: scoped tokens only see their own tasks.
+        // Respond with the same 404 as not-found to avoid UUID-existence probing.
+        const ctx = request.tokenContext;
+        if (!ctx.isMaster && task.createdByToken !== ctx.name) {
           return reply.code(404).send({
             error: 'Not Found',
             message: `Task ${taskId} not found`,

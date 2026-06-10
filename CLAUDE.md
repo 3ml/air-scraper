@@ -39,12 +39,14 @@ air-scraper/
 │   │   ├── server.ts               # Fastify setup
 │   │   ├── routes/
 │   │   │   ├── trigger.ts          # POST /api/trigger
+│   │   │   ├── screenshot.ts       # POST /api/screenshot (synchronous)
 │   │   │   ├── scenarios.ts        # GET /api/scenarios
 │   │   │   ├── health.ts           # GET /health
 │   │   │   ├── metrics.ts          # GET /metrics (Prometheus)
 │   │   │   └── admin.ts            # Admin API endpoints
 │   │   └── middleware/
-│   │       ├── auth.ts             # Token authentication
+│   │       ├── auth.ts             # Token authentication (attaches TokenContext)
+│   │       ├── tokenResolver.ts    # Master/scoped token resolution + scope checks
 │   │       └── requestId.ts        # Request correlation ID
 │   ├── db/
 │   │   ├── schema.ts               # Drizzle ORM schema
@@ -125,6 +127,7 @@ air-scraper/
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/trigger` | POST | Trigger scenario (action + data encrypted with AES-256-GCM) |
+| `/api/screenshot` | POST | Synchronous screenshot of a URL, returns base64 image (plain JSON body) |
 | `/api/tasks/:taskId` | GET | Get task status |
 | `/api/scenarios` | GET | List all scenarios with JSON Schema docs (auto-generated) |
 | `/health` | GET | Health check |
@@ -136,6 +139,52 @@ air-scraper/
 | `/admin/tasks/:taskId/cancel` | POST | Cancel pending task |
 
 **Encryption:** AES-256-GCM, key = SHA-256 of `ENCRYPTION_SECRET`, output = `base64(IV[12] + AuthTag[16] + Ciphertext)`. See [README.md](./README.md#encryption-guide-for-api-clients) for examples.
+
+### Authentication (two-tier tokens)
+
+All protected routes check the `x-auth-token` header via `authMiddleware`, which resolves the token with `src/api/middleware/tokenResolver.ts` (timing-safe comparison) and attaches a `TokenContext` (`{ isMaster, name, scenarios }`) to the Fastify request (module augmentation, same pattern as `requestId`).
+
+- **Master token** (`AUTH_TOKEN`): full access. `TokenContext.name` = `master` (reserved name).
+- **Scoped tokens** (`SCOPED_TOKENS` env var): JSON array `[{"token","name","scenarios"}]`. Can only trigger their listed scenarios, read only tasks they created (foreign tasks return 404 identical to not-found), and see a filtered `GET /api/scenarios`. The pseudo-scope `"screenshot"` grants `POST /api/screenshot`. `/admin/*` is master-only (`adminAuthMiddleware`, 403 `ADMIN_ONLY`).
+
+**Important:** the trigger `action` is encrypted, so the scope check cannot live in the middleware — it runs in the `POST /api/trigger` handler after decryption (403 `SCENARIO_NOT_ALLOWED`). Task ownership is persisted in `tasks.created_by_token` (token name, `NULL` = master). Startup fails fast on invalid `SCOPED_TOKENS` (malformed JSON, duplicate tokens/names, collision with `AUTH_TOKEN`, reserved name `master`). After pulling this change run `npm run migrate` (or `ALTER TABLE tasks ADD COLUMN created_by_token text;`).
+
+### `POST /api/screenshot` - Synchronous Screenshot
+
+Dedicated endpoint that captures a screenshot of a URL and returns it directly (no task queue, no callback). Authenticated with the same `x-auth-token` header; body is plain JSON (not encrypted).
+
+**Input:**
+```json
+{
+  "url": "https://example.com",
+  "fullPage": true,
+  "format": "png",
+  "quality": 80,
+  "viewport": { "width": 1920, "height": 1080 }
+}
+```
+
+- `url` (required) - Target URL
+- `fullPage` (optional, default `true`) - Capture full scrollable page
+- `format` (optional, default `png`) - `png` or `jpeg`
+- `quality` (optional) - JPEG quality 1-100 (jpeg only)
+- `viewport` (optional) - `{ width, height }` viewport size
+
+**Output:**
+```json
+{
+  "success": true,
+  "image": "<base64-encoded image>",
+  "format": "png",
+  "fileSize": 123456,
+  "url": "https://example.com",
+  "timestamp": "2026-06-10T10:30:00.000Z"
+}
+```
+
+Uses the full stealth stack (ScraperEngine + cookie consent handling). Errors return 400 (validation), 401 (auth), or 500 (capture failure).
+
+**File:** `src/api/routes/screenshot.ts`
 
 ---
 
@@ -393,7 +442,8 @@ Renders self-contained HTML to PDF using Chromium's built-in PDF engine and uplo
 
 ### tasks
 Main task tracking table.
-- `uuid`, `requestId`, `action`, `inputData`, `status`
+- `uuid`, `requestId`, `createdByToken`, `action`, `inputData`, `status`
+- `createdByToken`: scoped token name that created the task; `NULL` = master token (or pre-feature rows). Used for ownership checks on `GET /api/tasks/:taskId`.
 - `priority`, `resultData`, `errorMessage`
 - `attemptCount`, `maxAttempts`, `nextRetryAt`
 - `callbackSentAt`, `callbackStatus`
@@ -456,7 +506,8 @@ To decrypt, use the same `ENCRYPTION_SECRET` shared between client and server. S
 |----------|-------------|---------|
 | `PORT` | Server port | 3000 |
 | `NODE_ENV` | Environment | development |
-| `AUTH_TOKEN` | API authentication token | required |
+| `AUTH_TOKEN` | Master API token (full access) | required |
+| `SCOPED_TOKENS` | JSON array of scenario-scoped tokens | `[]` |
 | `SCRAPER_SECRET` | Callback authentication | required |
 | `ENCRYPTION_SECRET` | AES-256-GCM encryption key | required |
 | `DATABASE_PATH` | SQLite file path | ./data/scraper.db |
