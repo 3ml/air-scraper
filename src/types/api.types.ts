@@ -20,6 +20,32 @@ export const triggerRequestSchema = z.object({
 
 export type TriggerRequest = z.infer<typeof triggerRequestSchema>;
 
+// Screenshot request schema (plain JSON, no encryption)
+export const screenshotRequestSchema = z.object({
+  url: z.string().url(),
+  fullPage: z.boolean().optional().default(true),
+  format: z.enum(['png', 'jpeg']).optional().default('png'),
+  quality: z.number().int().min(1).max(100).optional(), // jpeg only
+  viewport: z
+    .object({
+      width: z.number().int().min(320).max(3840),
+      height: z.number().int().min(240).max(2160),
+    })
+    .optional(),
+});
+
+export type ScreenshotRequest = z.infer<typeof screenshotRequestSchema>;
+
+// Screenshot response
+export interface ScreenshotResponse {
+  success: true;
+  image: string; // Base64-encoded image
+  format: 'png' | 'jpeg';
+  fileSize: number;
+  url: string;
+  timestamp: string;
+}
+
 // Trigger response
 export interface TriggerResponse {
   taskId: string;

@@ -160,6 +160,8 @@ HOST=0.0.0.0
 AUTH_TOKEN=generate-64-char-secure-token-here
 SCRAPER_SECRET=generate-another-secure-secret-here
 ENCRYPTION_SECRET=generate-secure-encryption-key-share-with-client
+# Optional: scoped tokens limited to specific scenarios (see "Authentication & Token Scopes")
+# SCOPED_TOKENS=[{"token":"tok_min_16_chars","name":"backend-vikey","scenarios":["vikey"]}]
 
 # Database
 DATABASE_PATH=/var/lib/air-scraper/data.db
@@ -355,6 +357,7 @@ rsync -avz /var/lib/air-scraper/ user@backup-server:/backups/air-scraper/
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/trigger` | POST | Trigger a scraping scenario |
+| `/api/screenshot` | POST | Take a screenshot of a URL (synchronous, returns base64 image) |
 | `/api/scenarios` | GET | List all scenarios with JSON Schema documentation |
 | `/api/tasks/:id` | GET | Get task status |
 | `/health` | GET | Health check |
@@ -362,6 +365,34 @@ rsync -avz /var/lib/air-scraper/ user@backup-server:/backups/air-scraper/
 | `/admin/tasks` | GET | List all tasks |
 | `/admin/logs` | GET | View logs |
 | `/admin/stats` | GET | Statistics |
+
+### Authentication & Token Scopes
+
+All protected endpoints use the `x-auth-token` header. Two tiers of tokens exist:
+
+- **Master token** (`AUTH_TOKEN` env var): full access to every endpoint and scenario.
+- **Scoped tokens** (`SCOPED_TOKENS` env var, optional): limited to specific scenarios.
+
+```bash
+SCOPED_TOKENS=[{"token":"tok_min_16_chars","name":"backend-vikey","scenarios":["vikey","screenshot"]}]
+```
+
+Each entry requires: `token` (min 16 chars, must differ from `AUTH_TOKEN`), `name` (unique, `master` is reserved, stored on tasks for ownership), `scenarios` (non-empty array of scenario actions; `"screenshot"` is a pseudo-scope granting `POST /api/screenshot`).
+
+Capabilities per token type:
+
+| Endpoint | Master | Scoped token |
+|----------|--------|--------------|
+| `POST /api/trigger` | Any scenario | Only scenarios in its list (403 `SCENARIO_NOT_ALLOWED` otherwise) |
+| `GET /api/tasks/:id` | Any task | Only tasks it created (foreign tasks return 404) |
+| `GET /api/scenarios` | Full list | Filtered to its scenarios |
+| `POST /api/screenshot` | Yes | Only with the `"screenshot"` pseudo-scope (403 `SCREENSHOT_NOT_ALLOWED`) |
+| `/admin/*` | Yes | No (403 `ADMIN_ONLY`) |
+
+Notes:
+- Since the trigger `action` is encrypted, the scope check happens server-side after decryption.
+- `SCOPED_TOKENS` unset or `[]` → only the master token works (backwards compatible).
+- The server fails to start on invalid `SCOPED_TOKENS` (malformed JSON, duplicate tokens/names, token equal to `AUTH_TOKEN`, reserved name `master`).
 
 ### Discover Available Scenarios
 
@@ -387,6 +418,45 @@ curl -X POST https://scraper.yourdomain.com/api/trigger \
     "callbackUrl": "https://your-app.com/callback"
   }'
 ```
+
+### Screenshot Request (Plain JSON)
+
+Synchronous endpoint: captures a screenshot of a URL and returns it as base64 in the response. The body is plain JSON (no encryption), protected by the same `x-auth-token` authentication.
+
+```bash
+curl -X POST https://scraper.yourdomain.com/api/screenshot \
+  -H "Content-Type: application/json" \
+  -H "x-auth-token: YOUR_AUTH_TOKEN" \
+  -d '{
+    "url": "https://example.com",
+    "fullPage": true,
+    "format": "png",
+    "viewport": { "width": 1920, "height": 1080 }
+  }'
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `url` | yes | URL to screenshot |
+| `fullPage` | no | Capture the full scrollable page (default `true`) |
+| `format` | no | `png` (default) or `jpeg` |
+| `quality` | no | JPEG quality 1-100 (jpeg only) |
+| `viewport` | no | `{ width, height }` viewport size |
+
+Response:
+
+```json
+{
+  "success": true,
+  "image": "iVBORw0KGgo...",
+  "format": "png",
+  "fileSize": 123456,
+  "url": "https://example.com",
+  "timestamp": "2026-06-10T10:30:00.000Z"
+}
+```
+
+Decode the image with `jq -r .image | base64 -d > screenshot.png`.
 
 ---
 
