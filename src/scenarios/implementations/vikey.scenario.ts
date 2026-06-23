@@ -1,5 +1,7 @@
 import { BaseScenario, type ScenarioConfig, type ScenarioContext } from '../BaseScenario.js';
 import type { ScraperEngine } from '../../scraper/ScraperEngine.js';
+import logger from '../../observability/logger.js';
+import { VIKEY_COUNTRY_ISO } from './vikey-country-iso.js';
 
 interface VikeyInput {
   vikeyId: string;
@@ -19,7 +21,7 @@ interface BillingData {
   nome: string | null;
   partitaIvaCf: string | null;
   passaporto: string | null;
-  paese: string | null;
+  paese: string | null; // ISO 3166-1 alpha-2 country code (e.g. "IT", "GB", "SA"), or null
   codiceUnivocoSid: string | null;
   pec: string | null;
   cap: string | null;
@@ -116,7 +118,7 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
             nome: { type: ['string', 'null'] },
             partitaIvaCf: { type: ['string', 'null'] },
             passaporto: { type: ['string', 'null'] },
-            paese: { type: ['string', 'null'] },
+            paese: { type: ['string', 'null'], description: 'Billing country as ISO 3166-1 alpha-2 (e.g. IT, GB, SA)' },
             codiceUnivocoSid: { type: ['string', 'null'] },
             pec: { type: ['string', 'null'] },
             cap: { type: ['string', 'null'] },
@@ -219,14 +221,19 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         }
       }
 
-      // 3. Wait for reservation data API to load (this guarantees data is ready)
-      await page
+      // 3. Wait for reservation data API to load (this guarantees data is ready).
+      // Capture the response: it carries the billing country code (invdata_country) and the
+      // guest documents (ndocs), both of which the DOM only renders asynchronously later.
+      const resvResponse = await page
         .waitForResponse(
           (response) =>
             response.url().includes('/api/v3/resv/resv') && response.status() === 200,
           { timeout: 30000 }
         )
         .catch(() => null);
+      const resvResults: Record<string, unknown> | null = resvResponse
+        ? ((await resvResponse.json().catch(() => null))?.results ?? null)
+        : null;
 
       // 4. Wait for page content to render
       await page.getByText('Informazioni generali').first().waitFor({ timeout: 15000 }).catch(() => {});
@@ -234,11 +241,48 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
       // 5. Extract general page data
       const generalData = await this.extractGeneralPageData(engine);
 
+      // 5b. Resolve the billing country. The "Paese" cell renders only after a later
+      // /api/v3/pa/countries lookup resolves, so DOM scraping races and misses it. Resolve it
+      // deterministically from the resv payload's numeric country code and emit ISO 3166-1
+      // alpha-2 (e.g. "GB", "SA", "IT").
+      const countryCode =
+        resvResults?.invdata_country != null ? String(resvResults.invdata_country) : null;
+      const paeseIso = countryCode ? (VIKEY_COUNTRY_ISO[countryCode] ?? null) : null;
+      if (countryCode && !paeseIso) {
+        logger.warn({ countryCode, vikeyId }, 'Vikey: unmapped country code, paese set to null');
+      }
+      generalData.billingData.paese = paeseIso;
+
       // 6. Navigate to documents tab using exact text match
       await page.getByText('Documenti e Burocrazia', { exact: true }).click();
 
       // Wait for documents section to load (event-driven)
       await page.getByText('Burocrazia').first().waitFor({ timeout: 15000 }).catch(() => {});
+
+      // The guest cards render asynchronously after the tab mounts, so extracting immediately
+      // races and returns []. The resv payload's `ndocs` (a JSON-encoded array) tells us how
+      // many guests to expect; wait until that many cards are present before extracting. Skip
+      // the wait entirely when there are no documents (avoids a needless timeout).
+      let expectedGuests = 0;
+      try {
+        const ndocs = resvResults?.ndocs;
+        const parsed = Array.isArray(ndocs) ? ndocs : JSON.parse(typeof ndocs === 'string' ? ndocs : '[]');
+        expectedGuests = Array.isArray(parsed) ? parsed.length : 0;
+      } catch {
+        expectedGuests = 0;
+      }
+      if (expectedGuests > 0) {
+        await page
+          .waitForFunction(
+            (n) =>
+              Array.from(document.querySelectorAll('div')).filter((d) =>
+                (d.textContent || '').includes('Nome ospite:')
+              ).length >= n,
+            expectedGuests,
+            { timeout: 15000 }
+          )
+          .catch(() => {});
+      }
 
       // 7. Extract guest documents
       const guests = await this.extractGuestDocuments(engine);

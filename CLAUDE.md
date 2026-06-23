@@ -335,11 +335,11 @@ Extracts reservation data from Vikey (my.vikey.it) including guest information, 
 - `numeroOspiti` - Number of guests
 - `linguaOspite` - Guest language
 - `guestFilledData` - Guest-filled data (nome, cognome, email)
-- `billingData` - Billing info (nome, partitaIvaCf, passaporto, paese, codiceUnivocoSid, pec, cap, citta, provincia, indirizzo)
+- `billingData` - Billing info (nome, partitaIvaCf, passaporto, paese, codiceUnivocoSid, pec, cap, citta, provincia, indirizzo). `paese` is an **ISO 3166-1 alpha-2** country code (e.g. `IT`, `GB`, `SA`), resolved from the resv API's numeric country code (`invdata_country`) via the static `src/scenarios/implementations/vikey-country-iso.ts` map — NOT DOM-scraped (the DOM renders the country name asynchronously and the scrape raced, returning null). `null` if absent or the code is unmapped.
 - `contractStatus` - Contract status text
 - `contractSigned` - Boolean indicating if contract is signed
 - `cityTaxStatus` - City tax status
-- `guests` - Array of guest documents with:
+- `guests` - Array of guest documents (the extractor waits for the expected number of cards — derived from the resv API's `ndocs` array — to render before scraping, so it no longer races and returns `[]`):
   - `nome`, `cognome`, `sesso`, `dataNascita`, `luogoNascita`
   - `cittadinanza`, `residenza`, `indirizzoResidenza`
   - `identityDocument` - Nested object with:
