@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "node scripts/generate-build-info.js && tsc",
     "start": "node dist/index.js",
+    "deploy": "bash scripts/deploy.sh",
     "migrate": "drizzle-kit push",
     "migrate:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",

@@ -202,7 +202,7 @@ npm run migrate
 
 ```bash
 # Start with PM2
-pm2 start ecosystem.config.js --env production
+pm2 start ecosystem.config.cjs --env production
 
 # Save PM2 configuration
 pm2 save
@@ -307,6 +307,32 @@ docker-compose logs -f
 ---
 
 ## Useful Commands
+
+### Deploying updates
+
+From your local machine, with `main` committed and pushed:
+
+```bash
+npm run deploy                 # Build + graceful PM2 reload on the server (current main)
+npm run deploy -- --migrate    # Also run DB migrations (drizzle-kit push)
+npm run deploy -- --dashboard  # Also rebuild the dashboard (dashboard/dist)
+DEPLOY_HOST=user@host npm run deploy   # Override the SSH target (default root@77.42.80.187)
+```
+
+What it does ([scripts/deploy.sh](scripts/deploy.sh)):
+
+1. **Preflight (local):** aborts unless the working tree is clean and `HEAD == origin/main`.
+2. **Remote:** SSH → `git reset --hard origin/main` → [scripts/remote-deploy.sh](scripts/remote-deploy.sh)
+   (`npm ci` → `npm run build` → `pm2 startOrReload ecosystem.config.cjs` → local `/health` check).
+   The reload is zero-downtime (cluster mode + `wait_ready`).
+3. **Verify (local):** [scripts/verify-deploy.sh](scripts/verify-deploy.sh) confirms the public `/health`
+   `gitCommit` matches local `HEAD`.
+
+Notes:
+- `.env` on the server is preserved (gitignored; `git clean` is never run).
+- Migrations and dashboard rebuilds are opt-in to keep routine backend deploys fast and non-interactive.
+- After upgrading Playwright, run `npx playwright install chromium` once on the server (`npm ci` does not
+  refresh the browser cache).
 
 ### PM2 Management
 

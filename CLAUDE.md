@@ -114,7 +114,7 @@ air-scraper/
 ├── package.json
 ├── tsconfig.json
 ├── drizzle.config.ts
-├── ecosystem.config.js             # PM2 configuration
+├── ecosystem.config.cjs            # PM2 configuration (.cjs: package is "type": "module")
 ├── .env.example
 ├── PIANO.md                        # Full implementation plan
 └── README.md                       # Setup instructions
@@ -560,7 +560,32 @@ npm run build            # Production build
 npm run test             # Run tests
 npm run typecheck        # Type checking
 npm run lint             # ESLint
+
+# Deploy (to production VPS — see "Deploying updates" below)
+npm run deploy                 # Build + reload backend on the server (current main)
+npm run deploy -- --migrate    # Also run DB migrations
+npm run deploy -- --dashboard  # Also rebuild the dashboard
 ```
+
+### Deploying updates
+
+`npm run deploy` ([scripts/deploy.sh](scripts/deploy.sh)) ships the current `main` to the production
+server in one command:
+
+1. **Preflight (local):** aborts unless the working tree is clean and `HEAD == origin/main` — so commit
+   and push before deploying.
+2. **Remote:** SSHes in, `git reset --hard origin/main`, then runs [scripts/remote-deploy.sh](scripts/remote-deploy.sh)
+   (`npm ci` → `npm run build` → `pm2 startOrReload ecosystem.config.cjs` → `/health` check). The reload
+   is graceful/zero-downtime (cluster mode + `wait_ready`).
+3. **Verify (local):** [scripts/verify-deploy.sh](scripts/verify-deploy.sh) confirms the public
+   `/health` `gitCommit` matches local `HEAD`.
+
+- SSH target defaults to `root@77.42.80.187`; override with `DEPLOY_HOST=user@host npm run deploy`.
+- Migrations and dashboard rebuilds are **opt-in** (`--migrate`, `--dashboard`).
+- `.env` on the server is never touched (gitignored; `git clean` is not run).
+- PM2 config lives in `ecosystem.config.cjs` (`.cjs` because the package is `"type": "module"`).
+- If Playwright is upgraded, run `npx playwright install chromium` once on the server (`npm ci` does
+  not refresh the browser cache).
 
 ---
 
