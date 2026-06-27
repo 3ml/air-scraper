@@ -232,16 +232,20 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
       }
 
       // 3. Wait for the reservation data API to load — or detect the "not available" state and fail
-      // fast. An unavailable reservation never returns 200 from /api/v3/resv/resv and the page renders
-      // an explicit error; the old "wait for 200" burned its full 30s timeout and the later element
-      // waits then ran their own timeouts (~5 min total). Race the API response against the error text.
-      // The response carries the billing country code (invdata_country) and the guest documents
-      // (ndocs), both of which the DOM only renders asynchronously later.
+      // fast. Race the resv data response against the page's explicit error text:
+      //   - Success arm: a 200 on /api/v3/resv/resv carries the data. Non-200s on this URL (304 cache
+      //     revalidation, auth retry, redirects) legitimately occur and must be SKIPPED, not treated as
+      //     "not found" — hence the status === 200 filter. The response carries the billing country code
+      //     (invdata_country) and the guest documents (ndocs), which the DOM only renders later.
+      //   - Fail-fast arm: an unavailable reservation renders an explicit error and never returns a 200,
+      //     so the old "wait for 200" burned its full 30s timeout (then later element waits ran their
+      //     own ~5 min of timeouts). The error text wins this race in ~1-2s instead.
       const resvOrError = await Promise.race([
         page
-          .waitForResponse((response) => response.url().includes('/api/v3/resv/resv'), {
-            timeout: 30000,
-          })
+          .waitForResponse(
+            (response) => response.url().includes('/api/v3/resv/resv') && response.status() === 200,
+            { timeout: 30000 }
+          )
           .catch(() => null),
         page
           .getByText(RESERVATION_UNAVAILABLE_TEXT)
@@ -252,9 +256,6 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
       ]);
 
       if (resvOrError === 'UNAVAILABLE') {
-        throw new ReservationUnavailableError(`Reservation ${vikeyId} is no longer available`);
-      }
-      if (resvOrError && resvOrError.status() !== 200) {
         throw new ReservationUnavailableError(`Reservation ${vikeyId} is no longer available`);
       }
       const resvResults: Record<string, unknown> | null = resvOrError
