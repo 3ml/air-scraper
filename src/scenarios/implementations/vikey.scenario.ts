@@ -3,6 +3,11 @@ import type { ScraperEngine } from '../../scraper/ScraperEngine.js';
 import logger from '../../observability/logger.js';
 import { VIKEY_COUNTRY_ISO } from './vikey-country-iso.js';
 
+const RESERVATION_UNAVAILABLE_TEXT = 'La prenotazione richiesta non è più disponibile';
+
+/** Thrown when the reservation page renders the "no longer available" state. */
+class ReservationUnavailableError extends Error {}
+
 interface VikeyInput {
   vikeyId: string;
   credentials: {
@@ -63,6 +68,7 @@ interface VikeyOutput {
   cityTaxStatus: string | null;
   guests: GuestDocument[];
   timestamp: string;
+  reservationUnavailable: boolean;
   error?: string;
 }
 
@@ -159,6 +165,10 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
           },
         },
         timestamp: { type: 'string', format: 'date-time', description: 'Extraction timestamp' },
+        reservationUnavailable: {
+          type: 'boolean',
+          description: 'True when the reservation no longer exists on Vikey',
+        },
         error: { type: 'string', description: 'Error message if success is false' },
       },
     },
@@ -221,18 +231,34 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         }
       }
 
-      // 3. Wait for reservation data API to load (this guarantees data is ready).
-      // Capture the response: it carries the billing country code (invdata_country) and the
-      // guest documents (ndocs), both of which the DOM only renders asynchronously later.
-      const resvResponse = await page
-        .waitForResponse(
-          (response) =>
-            response.url().includes('/api/v3/resv/resv') && response.status() === 200,
-          { timeout: 30000 }
-        )
-        .catch(() => null);
-      const resvResults: Record<string, unknown> | null = resvResponse
-        ? ((await resvResponse.json().catch(() => null))?.results ?? null)
+      // 3. Wait for the reservation data API to load — or detect the "not available" state and fail
+      // fast. An unavailable reservation never returns 200 from /api/v3/resv/resv and the page renders
+      // an explicit error; the old "wait for 200" burned its full 30s timeout and the later element
+      // waits then ran their own timeouts (~5 min total). Race the API response against the error text.
+      // The response carries the billing country code (invdata_country) and the guest documents
+      // (ndocs), both of which the DOM only renders asynchronously later.
+      const resvOrError = await Promise.race([
+        page
+          .waitForResponse((response) => response.url().includes('/api/v3/resv/resv'), {
+            timeout: 30000,
+          })
+          .catch(() => null),
+        page
+          .getByText(RESERVATION_UNAVAILABLE_TEXT)
+          .first()
+          .waitFor({ timeout: 30000 })
+          .then(() => 'UNAVAILABLE' as const)
+          .catch(() => null),
+      ]);
+
+      if (resvOrError === 'UNAVAILABLE') {
+        throw new ReservationUnavailableError(`Reservation ${vikeyId} is no longer available`);
+      }
+      if (resvOrError && resvOrError.status() !== 200) {
+        throw new ReservationUnavailableError(`Reservation ${vikeyId} is no longer available`);
+      }
+      const resvResults: Record<string, unknown> | null = resvOrError
+        ? ((await resvOrError.json().catch(() => null))?.results ?? null)
         : null;
 
       // 4. Wait for page content to render
@@ -253,8 +279,9 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
       }
       generalData.billingData.paese = paeseIso;
 
-      // 6. Navigate to documents tab using exact text match
-      await page.getByText('Documenti e Burocrazia', { exact: true }).click();
+      // 6. Navigate to documents tab using exact text match (bounded: reaching here implies the
+      // reservation is available, so a missing tab is a real failure — fail fast, never hang 5 min).
+      await page.getByText('Documenti e Burocrazia', { exact: true }).click({ timeout: 15000 });
 
       // Wait for documents section to load (event-driven)
       await page.getByText('Burocrazia').first().waitFor({ timeout: 15000 }).catch(() => {});
@@ -300,6 +327,7 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         cityTaxStatus: generalData.cityTaxStatus,
         guests,
         timestamp: new Date().toISOString(),
+        reservationUnavailable: false,
       };
     } catch (error) {
       return {
@@ -326,6 +354,7 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         cityTaxStatus: null,
         guests: [],
         timestamp: new Date().toISOString(),
+        reservationUnavailable: error instanceof ReservationUnavailableError,
         error: error instanceof Error ? error.message : String(error),
       };
     }

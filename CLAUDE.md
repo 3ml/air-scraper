@@ -345,6 +345,7 @@ Extracts reservation data from Vikey (my.vikey.it) including guest information, 
   - `identityDocument` - Nested object with:
     - `tipoDocumento`, `numeroDocumento`
     - `rilasciatoDa`, `dataRilascio`, `dataScadenza`
+- `reservationUnavailable` - Boolean. `true` when the reservation no longer exists on Vikey (the page renders *"La prenotazione richiesta non è più disponibile."*). In that case the scenario returns `success: false` with `error: "Reservation <id> is no longer available"` and **fails fast** (~1-2s) instead of running its element waits to timeout. Detection races the `/api/v3/resv/resv` response (any non-200 status ⇒ unavailable) against the DOM error text; previously this case let the waits — including an unbounded "Documenti e Burocrazia" click — run for ~5 min before failing.
 
 **File:** `src/scenarios/implementations/vikey.scenario.ts`
 
