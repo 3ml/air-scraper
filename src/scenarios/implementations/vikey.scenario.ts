@@ -3,9 +3,7 @@ import type { ScraperEngine } from '../../scraper/ScraperEngine.js';
 import logger from '../../observability/logger.js';
 import { VIKEY_COUNTRY_ISO } from './vikey-country-iso.js';
 
-const RESERVATION_UNAVAILABLE_TEXT = 'La prenotazione richiesta non è più disponibile';
-
-/** Thrown when the reservation page renders the "no longer available" state. */
+/** Thrown when the resv API reports the reservation no longer exists (HTTP 404). */
 class ReservationUnavailableError extends Error {}
 
 interface VikeyInput {
@@ -231,36 +229,38 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         }
       }
 
-      // 3. Wait for the reservation data API to load — or detect the "not available" state and fail
-      // fast. Race the resv data response against the page's explicit error text:
-      //   - Success arm: a 200 on /api/v3/resv/resv carries the data. Non-200s on this URL (304 cache
-      //     revalidation, auth retry, redirects) legitimately occur and must be SKIPPED, not treated as
-      //     "not found" — hence the status === 200 filter. The response carries the billing country code
-      //     (invdata_country) and the guest documents (ndocs), which the DOM only renders later.
-      //   - Fail-fast arm: an unavailable reservation renders an explicit error and never returns a 200,
-      //     so the old "wait for 200" burned its full 30s timeout (then later element waits ran their
-      //     own ~5 min of timeouts). The error text wins this race in ~1-2s instead.
-      const resvOrError = await Promise.race([
+      // 3. Wait for the reservation data API and classify it by HTTP status — the reliable signal:
+      //   - 200 carries the data (billing country `invdata_country`, guest docs `ndocs`), which the DOM
+      //     only renders asynchronously later.
+      //   - 404 means the reservation no longer exists (Vikey retries the call, all 404). Fail fast.
+      //   - Other statuses on this URL (304 revalidation, auth retry, redirects) are transient and ignored.
+      // NOTE: do NOT key off the DOM "La prenotazione richiesta non è più disponibile" text — it renders
+      // transiently during load even for VALID reservations (it briefly beats the 200), so it produces
+      // false "not available" results. The 404 vs 200 split does not.
+      const resvOutcome = await Promise.race([
         page
           .waitForResponse(
             (response) => response.url().includes('/api/v3/resv/resv') && response.status() === 200,
             { timeout: 30000 }
           )
+          .then((response) => ({ kind: 'ok' as const, response }))
           .catch(() => null),
         page
-          .getByText(RESERVATION_UNAVAILABLE_TEXT)
-          .first()
-          .waitFor({ timeout: 30000 })
-          .then(() => 'UNAVAILABLE' as const)
+          .waitForResponse(
+            (response) => response.url().includes('/api/v3/resv/resv') && response.status() === 404,
+            { timeout: 30000 }
+          )
+          .then(() => ({ kind: 'gone' as const }))
           .catch(() => null),
       ]);
 
-      if (resvOrError === 'UNAVAILABLE') {
+      if (resvOutcome?.kind === 'gone') {
         throw new ReservationUnavailableError(`Reservation ${vikeyId} is no longer available`);
       }
-      const resvResults: Record<string, unknown> | null = resvOrError
-        ? ((await resvOrError.json().catch(() => null))?.results ?? null)
-        : null;
+      const resvResults: Record<string, unknown> | null =
+        resvOutcome?.kind === 'ok'
+          ? ((await resvOutcome.response.json().catch(() => null))?.results ?? null)
+          : null;
 
       // 4. Wait for page content to render
       await page.getByText('Informazioni generali').first().waitFor({ timeout: 15000 }).catch(() => {});
