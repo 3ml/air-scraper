@@ -18,7 +18,8 @@ for arg in "$@"; do
 done
 
 echo "==> Installing dependencies (npm ci)"
-npm ci
+# npm ci occasionally flakes with ENOTEMPTY while wiping node_modules; force-clean and retry once.
+npm ci || { echo "npm ci failed — removing node_modules and retrying"; rm -rf node_modules; npm ci; }
 
 echo "==> Building backend"
 npm run build
