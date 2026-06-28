@@ -61,6 +61,11 @@ const envSchema = z.object({
   // Logging
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   LOG_FILE: z.string().optional(),
+
+  // Telegram alerts (optional). When unset, sendTelegramMessage() no-ops with a warning.
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_ALERTS_CHAT_ID: z.string().optional(),
+  TELEGRAM_ALERTS_CHAT_MESSAGE_THREAD_ID: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

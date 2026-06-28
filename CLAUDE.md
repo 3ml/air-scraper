@@ -439,6 +439,69 @@ Renders self-contained HTML to PDF using Chromium's built-in PDF engine and uplo
 
 ---
 
+## Telegram Alerts — `sendTelegramMessage()`
+
+Standalone, fire-and-forget helper that posts a **plain-text** message to the configured
+Telegram group via the bot. Use it from **any scenario or service** to report errors or
+events. Drop it in wherever you want a Telegram notification — it has no dependencies on the
+task/queue system.
+
+**File:** `src/services/telegram.ts`
+
+### Signature
+
+```typescript
+import { sendTelegramMessage } from '../../services/telegram.js'; // adjust relative path to caller
+
+function sendTelegramMessage(
+  text: string,
+  options?: { chatId?: string; messageThreadId?: string },
+): Promise<boolean>;
+```
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `text` | yes | Plain-text message body (no `parse_mode`; emoji are fine). |
+| `options.chatId` | no | Override the default `TELEGRAM_ALERTS_CHAT_ID`. |
+| `options.messageThreadId` | no | Override the default group topic/thread `TELEGRAM_ALERTS_CHAT_MESSAGE_THREAD_ID`. |
+
+### Behavior
+
+- **Default target:** `TELEGRAM_ALERTS_CHAT_ID`, in topic `TELEGRAM_ALERTS_CHAT_MESSAGE_THREAD_ID`.
+  Pass `options` only when you need a different chat/thread for a specific call.
+- **Never throws** — safe to `await` directly inside `catch` blocks and error paths.
+- Returns `true` on success; returns `false` (and logs) if the send fails or if the Telegram
+  env vars are not configured (graceful no-op, never blocks the caller).
+- **Single attempt** (no retry). It does not persist anything to the DB (unlike `AlertService`).
+- Requires `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALERTS_CHAT_ID` to be set; see Environment Variables.
+
+### Usage examples
+
+```typescript
+import { sendTelegramMessage } from '../../services/telegram.js';
+
+// 1. Report an error inside a scenario run() or any service:
+try {
+  // ...scraping...
+} catch (error) {
+  await sendTelegramMessage(
+    `❌ vikey ${input.vikeyId} failed: ${error instanceof Error ? error.message : String(error)}`
+  );
+  throw error;
+}
+
+// 2. Notify a non-error event:
+await sendTelegramMessage(`✅ Reservation ${vikeyId} scraped (${guests.length} guests)`);
+
+// 3. Override the target chat/thread for one call:
+await sendTelegramMessage('Custom alert', { chatId: '-1001234567890', messageThreadId: '7' });
+
+// 4. Fire-and-forget without blocking (ignore the result):
+void sendTelegramMessage('Heads up: rate-limit nearing');
+```
+
+---
+
 ## Database Schema
 
 ### tasks
@@ -520,6 +583,9 @@ To decrypt, use the same `ENCRYPTION_SECRET` shared between client and server. S
 | `TASK_TIMEOUT_MS` | Task timeout | 300000 |
 | `LOG_LEVEL` | Pino log level | info |
 | `PROXY_ENABLED` | Enable proxy rotation | false |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token for alerts (see `sendTelegramMessage`) | optional |
+| `TELEGRAM_ALERTS_CHAT_ID` | Telegram chat/group id alerts are sent to | optional |
+| `TELEGRAM_ALERTS_CHAT_MESSAGE_THREAD_ID` | Topic/thread id inside the alerts group | optional |
 
 ---
 
