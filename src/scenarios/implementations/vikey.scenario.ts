@@ -2,9 +2,55 @@ import { BaseScenario, type ScenarioConfig, type ScenarioContext } from '../Base
 import type { ScraperEngine } from '../../scraper/ScraperEngine.js';
 import logger from '../../observability/logger.js';
 import { VIKEY_COUNTRY_ISO } from './vikey-country-iso.js';
+import { sendTelegramMessage } from '../../services/telegram.js';
 
 /** Thrown when the resv API reports the reservation no longer exists (HTTP 404). */
 class ReservationUnavailableError extends Error {}
+
+// Per-guest numeric country-code fields in the resv payload's `ndocs` entries. Confirmed
+// against the live API: each guest carries Vikey numeric codes (same family as the billing
+// `invdata_country`), e.g. "100000351" -> TR. The DOM renders the country NAME only after a
+// later /api/v3/pa/countries lookup, so these codes are the reliable, race-free source.
+const NDOCS_RESIDENCE_CODE_FIELD = 'residencecountry'; // "Residenza"
+const NDOCS_CITIZENSHIP_CODE_FIELD = 'citizenship'; // "Cittadinanza"
+
+/** Read a non-empty numeric country code from an ndocs guest entry, or null. */
+function ndocsCountryCode(entry: unknown, field: string): string | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const raw = (entry as Record<string, unknown>)[field];
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (s === '' || s === '0') return null; // present-but-empty guard
+  return s;
+}
+
+/**
+ * Map a guest's numeric country code to ISO 3166-1 alpha-2 for the billing-country fallback.
+ * On a map miss, leaves the field null and fires a Telegram alert (fire-and-forget) so the
+ * gap in VIKEY_COUNTRY_ISO can be closed later. Separate from the billing resolution so this
+ * alert is scoped to the fallback only.
+ */
+function resolveGuestCountryIso(
+  code: string,
+  ctx: { vikeyId: string; field: 'Residenza' | 'Cittadinanza'; domName: string | null }
+): string | null {
+  const iso = VIKEY_COUNTRY_ISO[code] ?? null;
+  if (!iso) {
+    logger.warn(
+      { code, vikeyId: ctx.vikeyId, field: ctx.field, domName: ctx.domName },
+      'Vikey: unmapped guest country code (paese fallback), paese left null'
+    );
+    void sendTelegramMessage(
+      `Vikey: unmapped country code (guest fallback)\n` +
+        `Reservation: ${ctx.vikeyId}\n` +
+        `Field: ${ctx.field}\n` +
+        `Name (DOM): ${ctx.domName ?? 'n/a'}\n` +
+        `Code: ${code}\n` +
+        `URL: https://my.vikey.it/reservations/${ctx.vikeyId}#documents`
+    );
+  }
+  return iso;
+}
 
 interface VikeyInput {
   vikeyId: string;
@@ -314,6 +360,42 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
 
       // 7. Extract guest documents
       const guests = await this.extractGuestDocuments(engine);
+
+      // 7b. Fallback billing country: when the reservation carries no billing country
+      // (invdata_country missing -> paese still null), derive it from the FIRST guest's
+      // identity document — Residenza first, then Cittadinanza — reusing the same numeric
+      // VIKEY_COUNTRY_ISO map. The numeric code comes from the resv payload's `ndocs`
+      // (authoritative); the DOM-scraped guest name only enriches the unmapped-code alert.
+      if (generalData.billingData.paese == null) {
+        let ndocsArr: unknown[] = [];
+        try {
+          const nd = resvResults?.ndocs;
+          ndocsArr = Array.isArray(nd) ? nd : JSON.parse(typeof nd === 'string' ? nd : '[]');
+          if (!Array.isArray(ndocsArr)) ndocsArr = [];
+        } catch {
+          ndocsArr = [];
+        }
+
+        const firstNdoc = ndocsArr[0] ?? null;
+        const firstGuest = guests[0] ?? null; // DOM name: alert enrichment only
+        const resCode = ndocsCountryCode(firstNdoc, NDOCS_RESIDENCE_CODE_FIELD);
+        const citCode = ndocsCountryCode(firstNdoc, NDOCS_CITIZENSHIP_CODE_FIELD);
+
+        if (resCode) {
+          generalData.billingData.paese = resolveGuestCountryIso(resCode, {
+            vikeyId,
+            field: 'Residenza',
+            domName: firstGuest?.residenza ?? null,
+          });
+        } else if (citCode) {
+          generalData.billingData.paese = resolveGuestCountryIso(citCode, {
+            vikeyId,
+            field: 'Cittadinanza',
+            domName: firstGuest?.cittadinanza ?? null,
+          });
+        }
+        // both missing -> leave paese null, no alert (nothing to map)
+      }
 
       return {
         success: true,
