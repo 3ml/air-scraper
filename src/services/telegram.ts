@@ -8,6 +8,9 @@ export interface TelegramMessageOptions {
   messageThreadId?: string;
 }
 
+/** Signature line appended to every message so recipients know the source. */
+const MESSAGE_FOOTER = '👉 Inviato da scraper.airelite.it';
+
 /**
  * Send a plain-text message to the configured Telegram alerts chat via the bot.
  *
@@ -35,7 +38,7 @@ export async function sendTelegramMessage(
   try {
     const body: Record<string, unknown> = {
       chat_id: chatId,
-      text,
+      text: `${text}\n\n${MESSAGE_FOOTER}`,
     };
     // Telegram requires the numeric thread id to post into a specific group topic.
     if (messageThreadId) {
