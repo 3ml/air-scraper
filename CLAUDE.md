@@ -340,11 +340,27 @@ Extracts reservation data from Vikey (my.vikey.it) including guest information, 
 - `contractSigned` - Boolean indicating if contract is signed
 - `cityTaxStatus` - City tax status
 - `guests` - Array of guest documents (the extractor waits for the expected number of cards — derived from the resv API's `ndocs` array — to render before scraping, so it no longer races and returns `[]`):
-  - `nome`, `cognome`, `sesso`, `dataNascita`, `luogoNascita`
-  - `cittadinanza`, `residenza`, `indirizzoResidenza`
+  - `nome`, `cognome`, `sesso`, `dataNascita`
+  - `luogoNascita`, `residenza` - **Structured geo objects** `{ comune, provincia, stato }` (see below)
+  - `cittadinanza`, `indirizzoResidenza`
   - `identityDocument` - Nested object with:
     - `tipoDocumento`, `numeroDocumento`
-    - `rilasciatoDa`, `dataRilascio`, `dataScadenza`
+    - `rilasciatoDa` - **Structured geo object** `{ comune, provincia, stato }` (see below)
+    - `dataRilascio`, `dataScadenza`
+
+  **Structured geo fields (`luogoNascita`, `residenza`, `identityDocument.rilasciatoDa`):** Vikey
+  renders these as a composite string `COMUNE - PROVINCIA - STATO` (e.g. `MILANO - MI - ITALY`), and
+  the extractor parses it into `{ comune, provincia, stato }`. **These parts (like the billing
+  `paese`) are resolved asynchronously by Vikey's frontend via a later `/api/v3/pa/countries` (+
+  comune/province) lookup** — the card mounts before the names resolve, rendering
+  `"- undefined - undefined"`. So before parsing, the guest-card wait now also holds until no card
+  text still contains the `undefined` placeholder (bounded by the same 15s timeout, best-effort).
+  Parsing rules: a clean 3-segment string maps to the three parts; anything else (foreign
+  birthplaces, or a value still unresolved after the timeout) keeps the whole raw string in
+  `comune` with `provincia`/`stato` = `null`; a missing/placeholder value yields all-`null` parts.
+  Any value still containing `undefined` is treated as unresolved and dropped to `null` (never
+  emitted verbatim). **Note: this is a breaking change** — these three fields were previously plain
+  strings.
 - `reservationUnavailable` - Boolean. `true` when the reservation no longer exists on Vikey. In that case the scenario returns `success: false` with `error: "Reservation <id> is no longer available"` and **fails fast** instead of running its element waits to timeout. Detection keys off the `/api/v3/resv/resv` **HTTP status** (the reliable signal): a `200` carries the data; a `404` means gone → fast-fail; other statuses (304 revalidation, auth retry, redirects) are transient and ignored. **Do NOT** key off the DOM *"La prenotazione richiesta non è più disponibile."* text — it renders transiently during load even for valid reservations and caused false "not available" results. Previously this case let the waits — including an unbounded "Documenti e Burocrazia" click — run for ~5 min before failing.
 
 **File:** `src/scenarios/implementations/vikey.scenario.ts`

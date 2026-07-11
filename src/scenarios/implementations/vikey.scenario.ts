@@ -79,10 +79,23 @@ interface BillingData {
   indirizzo: string | null;
 }
 
+/**
+ * A composite geo location scraped as "COMUNE - PROVINCIA - STATO" and parsed into parts.
+ * Vikey renders the string parts asynchronously (via /api/v3/pa/countries + comune/province
+ * lookups), so the extractor waits for resolution before parsing. When the raw string does not
+ * split into exactly 3 segments (e.g. foreign birthplaces), the whole raw value is kept in
+ * `comune` and the rest is null.
+ */
+interface Luogo {
+  comune: string | null;
+  provincia: string | null;
+  stato: string | null;
+}
+
 interface IdentityDocument {
   tipoDocumento: string | null;
   numeroDocumento: string | null;
-  rilasciatoDa: string | null;
+  rilasciatoDa: Luogo;
   dataRilascio: string | null;
   dataScadenza: string | null;
 }
@@ -92,9 +105,9 @@ interface GuestDocument {
   cognome: string | null;
   sesso: string | null;
   dataNascita: string | null;
-  luogoNascita: string | null;
+  luogoNascita: Luogo;
   cittadinanza: string | null;
-  residenza: string | null;
+  residenza: Luogo;
   indirizzoResidenza: string | null;
   identityDocument: IdentityDocument;
 }
@@ -190,9 +203,25 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
               cognome: { type: ['string', 'null'] },
               sesso: { type: ['string', 'null'] },
               dataNascita: { type: ['string', 'null'] },
-              luogoNascita: { type: ['string', 'null'] },
+              luogoNascita: {
+                type: 'object',
+                description: 'Place of birth (COMUNE - PROVINCIA - STATO) parsed into parts',
+                properties: {
+                  comune: { type: ['string', 'null'] },
+                  provincia: { type: ['string', 'null'] },
+                  stato: { type: ['string', 'null'] },
+                },
+              },
               cittadinanza: { type: ['string', 'null'] },
-              residenza: { type: ['string', 'null'] },
+              residenza: {
+                type: 'object',
+                description: 'Residence (COMUNE - PROVINCIA - STATO) parsed into parts',
+                properties: {
+                  comune: { type: ['string', 'null'] },
+                  provincia: { type: ['string', 'null'] },
+                  stato: { type: ['string', 'null'] },
+                },
+              },
               indirizzoResidenza: { type: ['string', 'null'] },
               identityDocument: {
                 type: 'object',
@@ -200,7 +229,15 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
                 properties: {
                   tipoDocumento: { type: ['string', 'null'] },
                   numeroDocumento: { type: ['string', 'null'] },
-                  rilasciatoDa: { type: ['string', 'null'] },
+                  rilasciatoDa: {
+                    type: 'object',
+                    description: 'Issuing place (COMUNE - PROVINCIA - STATO) parsed into parts',
+                    properties: {
+                      comune: { type: ['string', 'null'] },
+                      provincia: { type: ['string', 'null'] },
+                      stato: { type: ['string', 'null'] },
+                    },
+                  },
                   dataRilascio: { type: ['string', 'null'] },
                   dataScadenza: { type: ['string', 'null'] },
                 },
@@ -348,10 +385,18 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
       if (expectedGuests > 0) {
         await page
           .waitForFunction(
-            (n) =>
-              Array.from(document.querySelectorAll('div')).filter((d) =>
+            (n) => {
+              const cards = Array.from(document.querySelectorAll('div')).filter((d) =>
                 (d.textContent || '').includes('Nome ospite:')
-              ).length >= n,
+              );
+              if (cards.length < n) return false;
+              // All cards present — also wait out the async geo/country resolution.
+              // Luogo di nascita / Residenza / Rilasciato da are composite geo strings
+              // (COMUNE - PROVINCIA - STATO) whose parts render as "undefined" until the
+              // later /api/v3/pa/countries (and comune/province) lookup completes, so
+              // parsing on card-presence alone races and yields all-null parts.
+              return !cards.some((c) => (c.textContent || '').includes('undefined'));
+            },
             expectedGuests,
             { timeout: 15000 }
           )
@@ -385,7 +430,7 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
           generalData.billingData.paese = resolveGuestCountryIso(resCode, {
             vikeyId,
             field: 'Residenza',
-            domName: firstGuest?.residenza ?? null,
+            domName: firstGuest?.residenza?.stato ?? null,
           });
         } else if (citCode) {
           generalData.billingData.paese = resolveGuestCountryIso(citCode, {
@@ -604,7 +649,29 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
         if (!value) return null;
         const trimmed = value.trim();
         if (trimmed === 'Non compilato' || trimmed === '') return null;
+        // Composite geo fields render "undefined" placeholders until Vikey's async country
+        // lookup resolves. If the wait above timed out, drop the placeholder rather than
+        // parsing garbage like "- undefined - undefined".
+        if (trimmed.includes('undefined')) return null;
         return trimmed;
+      };
+
+      // Parse a composite geo string "COMUNE - PROVINCIA - STATO" into structured parts.
+      // Exactly-3-segment strings map cleanly; anything else (e.g. foreign birthplaces, or a
+      // still-unresolved value) keeps the raw string in `comune` with the rest null. A null/
+      // placeholder value yields all-null parts.
+      const parseLuogo = (value: string | null | undefined): Luogo => {
+        const raw = normalize(value);
+        if (!raw) return { comune: null, provincia: null, stato: null };
+        const parts = raw.split(' - ');
+        if (parts.length === 3) {
+          return {
+            comune: parts[0].trim() || null,
+            provincia: parts[1].trim() || null,
+            stato: parts[2].trim() || null,
+          };
+        }
+        return { comune: raw, provincia: null, stato: null };
       };
 
       // The guest card structure is:
@@ -680,14 +747,14 @@ export class VikeyScenario extends BaseScenario<VikeyInput, VikeyOutput> {
             cognome,
             sesso: normalize(fieldMap['Sesso']),
             dataNascita: normalize(fieldMap['Data di nascita']),
-            luogoNascita: normalize(fieldMap['Luogo di nascita']),
+            luogoNascita: parseLuogo(fieldMap['Luogo di nascita']),
             cittadinanza: normalize(fieldMap['Cittadinanza']),
-            residenza: normalize(fieldMap['Residenza']),
+            residenza: parseLuogo(fieldMap['Residenza']),
             indirizzoResidenza: normalize(fieldMap['Indirizzo di residenza']),
             identityDocument: {
               tipoDocumento: normalize(fieldMap['Tipo documento']),
               numeroDocumento: normalize(fieldMap['Numero documento']),
-              rilasciatoDa: normalize(fieldMap['Rilasciato da']),
+              rilasciatoDa: parseLuogo(fieldMap['Rilasciato da']),
               dataRilascio: normalize(fieldMap['Data di rilascio']),
               dataScadenza: normalize(fieldMap['Data di scadenza']),
             },
