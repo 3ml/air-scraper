@@ -149,6 +149,10 @@ All protected routes check the `x-auth-token` header via `authMiddleware`, which
 
 **Important:** the trigger `action` is encrypted, so the scope check cannot live in the middleware — it runs in the `POST /api/trigger` handler after decryption (403 `SCENARIO_NOT_ALLOWED`). Task ownership is persisted in `tasks.created_by_token` (token name, `NULL` = master). Startup fails fast on invalid `SCOPED_TOKENS` (malformed JSON, duplicate tokens/names, collision with `AUTH_TOKEN`, reserved name `master`). After pulling this change run `npm run migrate` (or `ALTER TABLE tasks ADD COLUMN created_by_token text;`).
 
+### Input redaction — credentials are never returned
+
+Task `inputData` (the decrypted trigger payload) is persisted in the DB **in cleartext** because the worker needs the real credentials to run the scrape ([`TaskWorker.ts`](src/queue/TaskWorker.ts) reads them back). But **credentials must never leave the service in a response, callback, or log** — returning credentials is an antipattern. `src/utils/redactInput.ts` exposes `redactInputData(input)`, which returns a deep copy of `inputData` with all sensitive fields **dropped** (not masked): keys matching (case-insensitive) `credentials`, `password`, `passwd`, `pwd`, `secret`, `token`, `apikey`, `accesstoken`, `username`. Non-sensitive fields (e.g. `vikeyId`, `url`) are preserved. It is applied at **every output boundary**: `GET /api/tasks/:taskId` ([trigger.ts](src/api/routes/trigger.ts)), `GET /admin/tasks` + `GET /admin/tasks/:taskId` ([admin.ts](src/api/routes/admin.ts)), the callback payload ([CallbackService.ts](src/services/CallbackService.ts)), and the "Starting scenario execution" log ([BaseScenario.ts](src/scenarios/BaseScenario.ts)). The dashboard reads the already-redacted admin API, so it shows no credentials either. **When adding any new path that surfaces `inputData`, wrap it in `redactInputData()`.**
+
 ### `POST /api/screenshot` - Synchronous Screenshot
 
 Dedicated endpoint that captures a screenshot of a URL and returns it directly (no task queue, no callback). Authenticated with the same `x-auth-token` header; body is plain JSON (not encrypted).
@@ -184,7 +188,28 @@ Dedicated endpoint that captures a screenshot of a URL and returns it directly (
 
 Uses the full stealth stack (ScraperEngine + cookie consent handling). Errors return 400 (validation), 401 (auth), or 500 (capture failure).
 
-**File:** `src/api/routes/screenshot.ts`
+**Overlay dismissal (automatic, no options):** after navigating, and before capturing, the endpoint
+waits for `networkidle` (best-effort, max 5s) and then runs `OverlayDismisser.dismissAll()` — a
+bounded (~10s) retry loop that closes anything covering the page. This exists because
+`ScraperEngine.navigate()` runs `CookieConsentHandler` **once**, ~1-3s after `domcontentloaded`,
+which is (a) too early for overlays injected later and (b) blind to dialogs with obfuscated markup
+(every `CookieConsentHandler` pattern first requires a container with `class*="cookie-banner"`,
+`id*="gdpr"`, …). Instagram is the reference case: a Meta cookie dialog with hashed class names
+(`_a9-- _ap36 _asz1`) appears at load, then a **login wall** modal appears ~3-7s later — a different
+popup entirely, dismissed by its X (`svg[aria-label="Chiudi"|"Close"]`).
+
+Each round the dismisser tries, in order: the existing `CookieConsentHandler` patterns → a button
+whose **accessible name** matches a consent phrase (`Consenti tutti i cookie`, `Allow all cookies`,
+`Accetta tutti`, …) → a **close control** inside a `[role="dialog"]` (`aria-label`/`title` matching
+`Chiudi`/`Close`/…) → `Escape`. It stops early after 2 quiet rounds, and caps at 6 clicks. Steps
+2-4 only click elements inside an overlay (a `[role="dialog"]`/`[aria-modal]`, or a `fixed`/`sticky`
+ancestor covering ≥15% of the viewport), so ordinary page content is never clicked. Dismissed
+overlays are logged as `dismissedOverlays` on the success log line.
+
+**Scope:** this runs **only** on `POST /api/screenshot`. `ScraperEngine.navigate()` is unchanged, so
+scenarios (`vikey`, `airelite-test`, …) keep their existing behavior.
+
+**Files:** `src/api/routes/screenshot.ts`, `src/scraper/consent/OverlayDismisser.ts`
 
 ---
 
@@ -568,7 +593,7 @@ Sent to `CALLBACK_URL` on task completion. **The entire payload is encrypted wit
   "requestId": "req-xxx",
   "action": "scenario_name",
   "status": "completed | failed",
-  "inputData": { "...original input..." },
+  "inputData": { "...original input, credentials redacted..." },
   "resultData": { "...extracted data..." },
   "error": { "message": "...", "code": "..." } | null,
   "executionMs": 12345,
