@@ -4,6 +4,7 @@ import { tasks, logs } from '../../db/schema.js';
 import { eq, desc, sql, and, gte, lte } from 'drizzle-orm';
 import { adminAuthMiddleware } from '../middleware/auth.js';
 import { adminListQuerySchema } from '../../types/api.types.js';
+import { redactInputData } from '../../utils/redactInput.js';
 
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   // List tasks with pagination and filters
@@ -44,7 +45,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.send({
           tasks: taskList.map((t) => ({
             ...t,
-            inputData: JSON.parse(t.inputData),
+            inputData: redactInputData(JSON.parse(t.inputData)),
             resultData: t.resultData ? JSON.parse(t.resultData) : null,
           })),
           pagination: {
@@ -94,7 +95,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.send({
           task: {
             ...task,
-            inputData: JSON.parse(task.inputData),
+            inputData: redactInputData(JSON.parse(task.inputData)),
             resultData: task.resultData ? JSON.parse(task.resultData) : null,
           },
           logs: taskLogs.map((l) => ({

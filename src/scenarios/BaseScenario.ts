@@ -1,5 +1,6 @@
 import { ScraperEngine, type ScraperResult } from '../scraper/ScraperEngine.js';
 import logger from '../observability/logger.js';
+import { redactInputData } from '../utils/redactInput.js';
 
 export interface ScenarioConfig {
   action: string;
@@ -50,7 +51,10 @@ export abstract class BaseScenario<TInput = Record<string, unknown>, TOutput = u
       requestId: context.requestId,
     });
 
-    scenarioLogger.info({ inputData: context.inputData }, 'Starting scenario execution');
+    scenarioLogger.info(
+      { inputData: redactInputData(context.inputData) },
+      'Starting scenario execution'
+    );
 
     // Validate input
     let validatedInput: TInput;

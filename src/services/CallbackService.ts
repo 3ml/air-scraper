@@ -4,6 +4,7 @@ import { tasks } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import logger from '../observability/logger.js';
 import { encryptObject } from '../utils/encryption.js';
+import { redactInputData } from '../utils/redactInput.js';
 import type { CallbackPayload } from '../types/api.types.js';
 
 const MAX_RETRIES = 3;
@@ -38,7 +39,7 @@ export class CallbackService {
       requestId: task.requestId,
       action: task.action,
       status: task.status as 'completed' | 'failed',
-      inputData: JSON.parse(task.inputData),
+      inputData: redactInputData(JSON.parse(task.inputData)),
       resultData: task.resultData ? JSON.parse(task.resultData) : null,
       error: task.errorMessage
         ? {

@@ -13,6 +13,7 @@ import { createRequestLogger } from '../../observability/logger.js';
 import { incrementRequestCounter } from '../../observability/metrics.js';
 import { taskQueue } from '../../queue/TaskQueue.js';
 import { decrypt, decryptObject } from '../../utils/encryption.js';
+import { redactInputData } from '../../utils/redactInput.js';
 
 export async function triggerRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post(
@@ -166,7 +167,7 @@ export async function triggerRoutes(fastify: FastifyInstance): Promise<void> {
           requestId: task.requestId,
           action: task.action,
           status: task.status,
-          inputData: JSON.parse(task.inputData),
+          inputData: redactInputData(JSON.parse(task.inputData)),
           resultData: task.resultData ? JSON.parse(task.resultData) : null,
           error: task.errorMessage
             ? {
