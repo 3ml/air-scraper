@@ -5,6 +5,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { createRequestLogger } from '../../observability/logger.js';
 import { incrementRequestCounter } from '../../observability/metrics.js';
 import { ScraperEngine } from '../../scraper/ScraperEngine.js';
+import { OverlayDismisser } from '../../scraper/consent/OverlayDismisser.js';
 
 export async function screenshotRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post(
@@ -43,11 +44,18 @@ export async function screenshotRoutes(fastify: FastifyInstance): Promise<void> 
         logger.info({ url: input.url, format: input.format }, 'Taking screenshot');
 
         const engine = new ScraperEngine({ sessionId: `screenshot-${uuidv4()}` });
+        let dismissedOverlays: string[] = [];
         const result = await engine.execute(async (eng) => {
           if (input.viewport) {
             await eng.rawPage!.setViewportSize(input.viewport);
           }
           await eng.navigate(input.url);
+          // Best-effort: let late XHR-driven content settle before hunting for overlays
+          await eng.rawPage!.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+          // Close consent dialogs, login walls and other modals covering the page
+          dismissedOverlays = await OverlayDismisser.dismissAll(eng.rawPage!);
+          // Let modal fade-out animations finish before capturing
+          await eng.rawPage!.waitForTimeout(500);
           return eng.rawPage!.screenshot({
             fullPage: input.fullPage,
             type: input.format,
@@ -68,7 +76,12 @@ export async function screenshotRoutes(fastify: FastifyInstance): Promise<void> 
 
         incrementRequestCounter(true);
         logger.info(
-          { url: input.url, fileSize: result.data.length, executionMs: result.executionMs },
+          {
+            url: input.url,
+            fileSize: result.data.length,
+            executionMs: result.executionMs,
+            dismissedOverlays,
+          },
           'Screenshot captured successfully'
         );
 
